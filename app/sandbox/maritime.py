@@ -81,7 +81,13 @@ class MaritimeSandbox:
             poll = await self.exec(f"if [ -f {codef} ]; then echo DONE; cat {codef}; "
                                    f"else echo RUNNING; fi", timeout=15)
             if "DONE" in poll.stdout:
-                exit_code = int(poll.stdout.strip().splitlines()[-1])
+                lines = [ln.strip() for ln in poll.stdout.strip().splitlines() if ln.strip()]
+                code = lines[-1] if lines else ""
+                if not code.isdigit():
+                    # code file exists but the exit code has not landed yet - keep polling
+                    await asyncio.sleep(self._s.sandbox_poll_interval_seconds)
+                    continue
+                exit_code = int(code)
                 out = await self.exec(f"tail -c 256000 {log}", timeout=30)
                 return ExecResult(exit_code, out.stdout, out.stderr)
             if time.monotonic() > deadline:
