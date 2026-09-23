@@ -1,0 +1,11 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: aw
+      POSTGRES_PASSWORD: aw
+      POSTGRES_DB: agent_workspace
+    ports: ["5433:5432"]
+  redis:
+    image: redis:7
+    ports: ["6380:6379"]
