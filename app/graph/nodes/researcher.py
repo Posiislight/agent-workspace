@@ -1,3 +1,5 @@
+import shlex
+
 from app.graph.nodes.helpers import apply_llm_cost, emit, model_for
 
 RESEARCHER_PROMPT = """You are the Researcher agent. You are given an implementation plan and must
@@ -25,7 +27,8 @@ async def researcher_node(state, *, services):
         {"role": "user", "content": f"PLAN:\n{state.get('plan') or ''}\n\nREPO: {state['repo']}"},
     ]
     first = await services.llm.chat(model, base_messages)
-    urls = [u for u in _urls(first.text)][:3]
+    urls = [u for u in _urls(first.text)
+            if u.startswith(("http://", "https://"))][:3]
 
     excerpts = []
     for url in urls:
@@ -56,7 +59,7 @@ async def _fetch_excerpt(state, services, url: str) -> str:
         sb = services.sandbox_factory(state)
         await sb.ensure()
         res = await sb.exec(
-            f"curl -sL --max-time 20 {url} | sed -e 's/<[^>]*>/ /g' | tr -s ' \\n' ' ' | head -c 8000")
+            f"curl -sL --max-time 20 {shlex.quote(url)} | sed -e 's/<[^>]*>/ /g' | tr -s ' \\n' ' ' | head -c 8000")
         return res.stdout
     except Exception as e:  # noqa: BLE001 - research must not crash the run
         return f"(fetch failed: {e})"
