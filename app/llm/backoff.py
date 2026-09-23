@@ -2,6 +2,7 @@ import asyncio
 
 import httpx
 
+# 501 and 505-508 excluded intentionally: they signal permanent server issues, not retryable ones.
 _TRANSIENT_STATUSES = {408, 429, 500, 502, 503, 504}
 
 

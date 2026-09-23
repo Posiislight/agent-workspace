@@ -26,9 +26,9 @@ class OpenRouterClient:
         if stream_cb is not None:
             body["stream"] = True
             body["stream_options"] = {"include_usage": True}
-        r = await self._client.post("/chat/completions", json=body, headers=self._headers)
-        r.raise_for_status()
         if stream_cb is None:
+            r = await self._client.post("/chat/completions", json=body, headers=self._headers)
+            r.raise_for_status()
             d = r.json()
             u = d.get("usage") or {}
             return LLMResult(d["choices"][0]["message"]["content"],
@@ -36,20 +36,23 @@ class OpenRouterClient:
 
         text_parts: list[str] = []
         usage: dict = {}
-        async for line in r.aiter_lines():
-            if not line.startswith("data:"):
-                continue
-            payload = line[5:].strip()
-            if payload == "[DONE]":
-                break
-            chunk = json.loads(payload)
-            if chunk.get("usage"):
-                usage = chunk["usage"]
-            for choice in chunk.get("choices", []):
-                delta = choice.get("delta", {}).get("content") or ""
-                if delta:
-                    text_parts.append(delta)
-                    stream_cb(delta)
+        async with self._client.stream("POST", "/chat/completions", json=body,
+                                       headers=self._headers) as r:
+            r.raise_for_status()
+            async for line in r.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    break
+                chunk = json.loads(payload)
+                if chunk.get("usage"):
+                    usage = chunk["usage"]
+                for choice in chunk.get("choices", []):
+                    delta = choice.get("delta", {}).get("content") or ""
+                    if delta:
+                        text_parts.append(delta)
+                        stream_cb(delta)
         return LLMResult("".join(text_parts), usage.get("prompt_tokens", 0),
                          usage.get("completion_tokens", 0), model)
 

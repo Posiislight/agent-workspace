@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 
@@ -34,6 +36,9 @@ async def test_chat_streams_deltas_and_final_usage():
     ]
 
     def handler(request):
+        body = json.loads(request.content)
+        assert body["stream"] is True
+        assert body["stream_options"] == {"include_usage": True}
         return httpx.Response(200, content="\n\n".join(sse_lines).encode())
 
     c = OpenRouterClient(api_key="k", client=mock_client(handler))
