@@ -31,5 +31,6 @@ class EventPublisher:
         self._prefix = prefix
 
     async def publish(self, event: Event) -> str:
+        """Return the new stream id; str holds only when the client uses decode_responses=True."""
         return await self._redis.xadd(f"{self._prefix}:{event.task_id}:events",
                                       event.to_stream_fields())
