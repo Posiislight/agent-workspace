@@ -60,9 +60,19 @@ async def coding_agent_node(state, *, services):
                          {"role": "user", "content":
                           f"Invalid response ({e}). Reply with ONLY the JSON object."}]
             continue
+        try:
+            for op in ops:
+                await _apply_op(services, state, sb, op)
+        except (ValueError, KeyError, AttributeError, TypeError) as e:
+            bad_rounds += 1
+            if bad_rounds >= 2:
+                updates["error_log"] = updates["error_log"] + [f"coding_agent: malformed ops ({e})"]
+                return Command(update={**updates, "status": "needs_human"}, goto="needs_human")
+            messages += [{"role": "assistant", "content": result.text},
+                         {"role": "user", "content":
+                          f"Ops failed to apply ({e}). Reply with ONLY the JSON object with valid ops."}]
+            continue
         bad_rounds = 0
-        for op in ops:
-            await _apply_op(services, state, sb, op)
         if done:
             diff = await sb.diff()
             if not diff.strip():
