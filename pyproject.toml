@@ -31,6 +31,14 @@ markers = [
     "integration: requires docker-compose services (redis/postgres)",
     "e2e: requires real OPENROUTER_API_KEY and MARITIME_API_KEY",
 ]
+filterwarnings = [
+    # tests/conftest.py must set WindowsSelectorEventLoopPolicy because psycopg3
+    # async refuses ProactorEventLoop (Python 3.14's Windows default). Both policy
+    # APIs are deprecated in 3.14 (removal slated for 3.16); ignore only these
+    # two exact messages until pytest-asyncio offers a loop_factory hook.
+    "ignore:'asyncio\\.WindowsSelectorEventLoopPolicy' is deprecated:DeprecationWarning",
+    "ignore:'asyncio\\.set_event_loop_policy' is deprecated:DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100
