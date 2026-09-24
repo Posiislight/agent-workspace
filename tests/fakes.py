@@ -36,10 +36,11 @@ class FakePublisher:
 
 class StubSandbox:
     def __init__(self, run_results=None, exec_stdout="ok",
-                 diff_text="diff --git a/app.py b/app.py\n+def add(a, b):\n    return a + b\n"):
+                 diff_text="diff --git a/app.py b/app.py\n+def add(a, b):\n    return a + b\n",
+                 default_run_result=None):
         self.agent_id = "stub-agent"
         self.run_results = list(run_results or [])
-        self.default_run_result = ExecResult(0, "1 passed in 0.01s", "")
+        self.default_run_result = default_run_result or ExecResult(0, "1 passed in 0.01s", "")
         self.exec_stdout = exec_stdout
         self.diff_text = diff_text
         self.files: dict[str, str] = {}
