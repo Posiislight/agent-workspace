@@ -25,6 +25,8 @@ class RunManager:
     def __init__(self, services, graph):
         self.services = services
         self.graph = graph
+        self._drives: dict[str, asyncio.Task] = {}
+        self._resume_spawns: set[str] = set()
 
     def _config(self, task_id):
         return {"configurable": {"thread_id": task_id}}
@@ -32,8 +34,27 @@ class RunManager:
     async def prepare(self, task_id, values):
         await self._mirror(task_id, values)
 
+    def _spawn(self, task_id, coro):
+        task = asyncio.create_task(coro)
+        self._drives[task_id] = task
+        task.add_done_callback(lambda t: self._on_drive_done(task_id, t))
+        return task
+
+    def _on_drive_done(self, task_id, task):
+        if self._drives.get(task_id) is task:
+            self._drives.pop(task_id, None)
+        self._resume_spawns.discard(task_id)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None:
+            return
+        asyncio.create_task(
+            self._emit(task_id, "run_manager", "node_completed",
+                       {"error": repr(exc)}))
+
     async def start(self, task_id, initial_state_values):
-        return asyncio.create_task(self.drive(task_id, initial_state_values))
+        return self._spawn(task_id, self.drive(task_id, initial_state_values))
 
     async def drive(self, task_id, graph_input):
         lock_key = f"aw:{task_id}:driving"
@@ -53,6 +74,10 @@ class RunManager:
                     # Redis/PG mirror and are stamped into graph state at resume time.
                     values["paused_at"] = now_iso()
                     values["status"] = "awaiting_approval"
+                    # A paused drive can never take another step, so vacate the
+                    # tracking slot BEFORE the mirror becomes observable: any
+                    # resume that sees awaiting_approval then sees no live drive.
+                    self._drives.pop(task_id, None)
                     await self._mirror(task_id, values)
                     await self._emit(task_id, "human_approval", "node_started",
                                      {"paused_at": values["paused_at"], "paused": True})
@@ -67,6 +92,9 @@ class RunManager:
                 await self.services.redis.delete(lock_key)
 
     async def resume(self, task_id, decision, feedback=None):
+        live = self._drives.get(task_id)
+        if live is not None and not live.done() and task_id in self._resume_spawns:
+            raise AlreadyRunning(task_id)
         state = await self.get_state(task_id)
         if not state:
             raise TaskNotFound(task_id)
@@ -82,10 +110,11 @@ class RunManager:
                          {"paused_at": paused, "resumed_at": resumed,
                           "resume_latency_seconds": latency, "decision": decision})
         payload = {"decision": decision, "feedback": feedback or ""}
-        return asyncio.create_task(
-            self.drive(task_id, Command(resume=payload,
-                                        update={"paused_at": paused,
-                                                "resumed_at": resumed})))
+        self._resume_spawns.add(task_id)
+        return self._spawn(
+            task_id, self.drive(task_id, Command(resume=payload,
+                                                 update={"paused_at": paused,
+                                                         "resumed_at": resumed})))
 
     async def get_state(self, task_id):
         if self.services.redis is not None:

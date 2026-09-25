@@ -1,4 +1,3 @@
-import asyncio
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request
@@ -33,7 +32,7 @@ async def create_task(body: TaskCreate, request: Request):
                             body.test_command or "", body.model_overrides))
     rm = request.app.state.run_manager
     await rm.prepare(task_id, st)
-    asyncio.create_task(rm.drive(task_id, st))
+    await rm.start(task_id, st)
     return {"task_id": task_id}
 
 
