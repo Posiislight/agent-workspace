@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 
 from app.config import Settings
-from app.graph.nodes.helpers import Services
 from app.llm.openrouter import LLMResult
 from app.sandbox.base import ExecResult
 
@@ -132,7 +131,8 @@ class FakeRedis:
 
 
 def make_services(llm=None, sandbox=None, publisher=None, prices=None,
-                  computers=None, settings=None, redis=None, pg_dsn=None) -> SimpleNamespace:
+                  computers=None, settings=None, redis=None, pg_dsn=None,
+                  github=None) -> SimpleNamespace:
     """Build a Services namespace wired to fakes. sandbox_factory returns the shared stub."""
     from app.graph.nodes.helpers import Services
 
@@ -147,4 +147,42 @@ def make_services(llm=None, sandbox=None, publisher=None, prices=None,
         computers=computers or StubComputers(),
         redis=redis,
         pg_dsn=pg_dsn,
+        github=github,
     )
+
+
+class StubGitHub:
+    """Fake GitHubClient that records calls for assertions."""
+
+    def __init__(self, existing_prs=None, created=None):
+        self.existing_prs = dict(existing_prs or [])
+        self.created = created or {"number": 11,
+                                   "html_url": "https://github.com/org/repo/pull/11",
+                                   "draft": True}
+        self.created_prs: list[dict] = []
+        self.comments: list[tuple[int, str]] = []
+        self.ready: list[int] = []
+        self.merged: list[int] = []
+
+    async def find_open_pr(self, repo, head):
+        return self.existing_prs.get(head)
+
+    async def create_pr(self, repo, *, title, body, head, base, draft=True):
+        self.created_prs.append({"title": title, "body": body, "head": head,
+                                 "base": base, "draft": draft})
+        return self.created
+
+    async def mark_ready(self, repo, number):
+        self.ready.append(number)
+        return {}
+
+    async def add_comment(self, repo, number, body):
+        self.comments.append((number, body))
+        return {}
+
+    async def merge_pr(self, repo, number):
+        self.merged.append(number)
+        return {}
+
+    async def aclose(self):
+        pass

@@ -1,6 +1,6 @@
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable
 
 from app.events.publisher import Event
 
@@ -19,6 +19,7 @@ class Services:
     computers: object
     redis: object
     pg_dsn: str | None = None
+    github: object = None
     clock: Callable[[], str] = field(default_factory=lambda: now_iso)
 
 
