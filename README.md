@@ -20,6 +20,31 @@ In progress / planned (see `docs/superpowers/`):
   GitHub webhooks, Commit & PR finalization
 - Phase 3 — cost tracking (per-call LLM cost, VM awake-minutes, audit rows)
 
+## Phase 2 — GitHub approval loop
+
+At the human-approval gate the system pushes an `aw/{task_id}` branch and opens a
+**draft PR** containing the task, plan, diff, test results, reviewer comments, running
+cost, and retry counts. The task then sleeps until a decision arrives.
+
+Webhook setup on the target repo (Settings → Webhooks):
+
+- Payload URL: `https://<your-host>/webhooks/github`
+- Content type: `application/json`
+- Secret: the value of `GITHUB_WEBHOOK_SECRET` (HMAC-SHA256 verified)
+- Events: Pull requests, Pull request reviews, Issue comments
+
+Deciding from GitHub itself:
+
+- comment `approve` on the PR, or submit an approving review, or mark the PR
+  ready for review → task resumes as approved
+- comment `reject: <reason>` (or a changes-requested review) → task resumes as
+  rejected; the reason is appended to the task description and the plan is revised
+  by the Planner
+
+Once approved, the `commit_pr` node pushes the final branch, marks the PR ready
+(or squash-merges when `MERGE_PR_WHEN_READY=true`), and appends a final summary
+comment with total cost, retry cycles, and pause/resume timestamps.
+
 ## Setup
 
 macOS / Linux:
