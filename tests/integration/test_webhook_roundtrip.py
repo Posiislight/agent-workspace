@@ -118,6 +118,15 @@ async def test_approve_via_webhook_reaches_done_with_ready_pr(settings, redis_cl
     row = await get_task_by_pr(settings.database_url, "org/repo", 11)
     assert row is not None and row["task_id"] == tid
 
+    entries = await redis_client.xrange(f"aw:{tid}:events", min="-", max="+")
+    assert entries
+    wake = [e for e in entries
+            if e[1].get("type") == "sleep_wake"]
+    assert wake, f"no sleep_wake event; got {entries}"
+    data = json.loads(wake[0][1]["data"])
+    assert "resume_latency_seconds" in data
+    assert data["resume_latency_seconds"] >= 0.0
+
 
 async def test_reject_via_webhook_loops_back_to_planner(settings, redis_client):
     await ensure_schema(settings.database_url)
