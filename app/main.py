@@ -7,6 +7,7 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from app.api import routes_webhooks
 from app.api.routes_tasks import router
 from app.config import get_settings
 from app.db import ensure_schema, make_checkpointer
@@ -68,6 +69,7 @@ def create_app(services=None, graph=None) -> FastAPI:
         app.state.services = services
         app.state.run_manager = RunManager(services, graph)
     app.include_router(router)
+    app.include_router(routes_webhooks.router)
 
     # Serve the production frontend build (app/frontend/dist) at "/".
     # Registered after the API router so /tasks* keeps priority.
