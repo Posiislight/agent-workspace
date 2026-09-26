@@ -169,7 +169,8 @@ class RunManager:
                               resumed_at=values.get("resumed_at"),
                               cost_so_far=values.get("cost_so_far"),
                               retry_counts=values.get("retry_counts"),
-                              pr_url=values.get("pr_url"))
+                              pr_url=values.get("pr_url"),
+                              pr_number=values.get("pr_number"))
 
     async def _emit(self, task_id, node, type, data):
         await self.services.publisher.publish(

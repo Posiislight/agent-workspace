@@ -44,6 +44,7 @@ class TaskState(TypedDict):
     paused_at: Optional[str]
     resumed_at: Optional[str]
     pr_url: Optional[str]
+    pr_number: Optional[int]
 
 
 def initial_state(task_id: str, description: str, repo: str, base_branch: str,
@@ -54,5 +55,5 @@ def initial_state(task_id: str, description: str, repo: str, base_branch: str,
         test_results=None, review_comments=None, approval_status="pending",
         retry_counts={"testing": 0, "coding": 0}, cost_so_far=0.0, sandbox_id=None,
         computer_id=None, status="planning", error_log=[], model_overrides=model_overrides,
-        paused_at=None, resumed_at=None, pr_url=None,
+        paused_at=None, resumed_at=None, pr_url=None, pr_number=None,
     )
