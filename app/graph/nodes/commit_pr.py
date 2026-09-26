@@ -30,7 +30,11 @@ async def commit_pr_node(state, *, services):
     ])
     if state.get("paused_at") and state.get("resumed_at"):
         summary += f"\n- Paused at: {state['paused_at']}, resumed at: {state['resumed_at']}"
-    await github.add_comment(repo, pr["number"], summary)
+    comments = await github.list_comments(repo, pr["number"])
+    already_posted = any(c.get("body", "").startswith("## Final summary")
+                         for c in comments)
+    if not already_posted:
+        await github.add_comment(repo, pr["number"], summary)
     await emit(services, state, "commit_pr", "node_completed",
                {"pr_url": pr["html_url"]})
     return {"status": "done", "pr_url": pr["html_url"]}

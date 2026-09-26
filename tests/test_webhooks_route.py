@@ -116,6 +116,18 @@ async def test_not_awaiting_returns_409(client, app, monkeypatch):
     assert resp.status_code == 409
 
 
+async def test_non_object_json_body_returns_400(client, monkeypatch):
+    body = b"[1, 2, 3]"
+    headers = {"x-hub-signature-256": "sha256=" + hmac_mod.new(
+        SECRET.encode(), body, hashlib.sha256).hexdigest(),
+        "x-github-event": "pull_request_review",
+        "content-type": "application/json"}
+    resp = await client.post("/webhooks/github", content=body, headers=headers)
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "invalid json"
+    assert client._transport.app.state.run_manager.calls == []
+
+
 async def test_ignored_events_return_200(client, app):
     resp = await _post(client, "push", {"action": "x"})
     assert resp.status_code == 200

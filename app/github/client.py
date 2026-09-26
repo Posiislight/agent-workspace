@@ -26,6 +26,14 @@ class GitHubClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def _request_idempotent_final(self, method: str, path: str, **kwargs) -> dict:
+        try:
+            return await self._request(method, path, **kwargs)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in (405, 422):
+                return {"already_finalized": True}
+            raise
+
     async def find_open_pr(self, repo: str, head: str) -> dict | None:
         pulls = await self._request(
             "GET", f"/repos/{repo}/pulls",
@@ -41,15 +49,19 @@ class GitHubClient:
               "base": base, "draft": draft})
 
     async def mark_ready(self, repo: str, number: int) -> dict:
-        return await self._request(
+        return await self._request_idempotent_final(
             "PATCH", f"/repos/{repo}/pulls/{number}", json={"draft": False})
 
     async def add_comment(self, repo: str, number: int, body: str) -> dict:
         return await self._request(
             "POST", f"/repos/{repo}/issues/{number}/comments", json={"body": body})
 
-    async def merge_pr(self, repo: str, number: int) -> dict:
+    async def list_comments(self, repo: str, number: int) -> list[dict]:
         return await self._request(
+            "GET", f"/repos/{repo}/issues/{number}/comments")
+
+    async def merge_pr(self, repo: str, number: int) -> dict:
+        return await self._request_idempotent_final(
             "PUT", f"/repos/{repo}/pulls/{number}/merge",
             json={"merge_method": "squash"})
 

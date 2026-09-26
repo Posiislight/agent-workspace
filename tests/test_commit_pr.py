@@ -38,6 +38,14 @@ async def test_commit_pr_merges_when_configured():
     assert gh.merged == [11]
 
 
+async def test_commit_pr_skips_comment_when_final_summary_exists():
+    gh = StubGitHub(initial_comments=[{"body": "## Final summary\n- Total cost: $0.50"}])
+    services = make_services(github=gh, sandbox=StubSandbox())
+    result = await commit_pr_node(_state(), services=services)
+    assert result["status"] == "done"
+    assert gh.comments == []
+
+
 async def test_commit_pr_creates_pr_when_state_has_none():
     gh = StubGitHub(existing_prs={"org:aw/t1": {
         "number": 5, "html_url": "https://github.com/org/repo/pull/5",

@@ -154,12 +154,14 @@ def make_services(llm=None, sandbox=None, publisher=None, prices=None,
 class StubGitHub:
     """Fake GitHubClient that records calls for assertions."""
 
-    def __init__(self, existing_prs=None, created=None):
+    def __init__(self, existing_prs=None, created=None, initial_comments=None):
         self.existing_prs = dict(existing_prs or [])
         self.created = created or {"number": 11,
                                    "html_url": "https://github.com/org/repo/pull/11",
                                    "draft": True}
         self.created_prs: list[dict] = []
+        self.all_comments: list[dict] = [
+            {"body": c["body"]} for c in (initial_comments or [])]
         self.comments: list[tuple[int, str]] = []
         self.ready: list[int] = []
         self.merged: list[int] = []
@@ -178,8 +180,12 @@ class StubGitHub:
         self.ready.append(number)
         return {}
 
+    async def list_comments(self, repo, number):
+        return list(self.all_comments)
+
     async def add_comment(self, repo, number, body):
         self.comments.append((number, body))
+        self.all_comments.append({"body": body})
         return {}
 
     async def merge_pr(self, repo, number):

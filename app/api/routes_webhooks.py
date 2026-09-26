@@ -19,6 +19,8 @@ async def github_webhook(request: Request):
         payload = await request.json()
     except Exception:  # noqa: BLE001
         return _err(400, "invalid json")
+    if not isinstance(payload, dict):
+        return _err(400, "invalid json")
     event = request.headers.get("x-github-event", "")
     decision = classify_event(event, payload)
     if not decision:

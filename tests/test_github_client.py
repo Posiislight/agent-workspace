@@ -60,3 +60,51 @@ async def test_create_pr_sends_draft_body():
     assert pr["number"] == 3 and pr["draft"] is True
     assert seen == {"title": "T", "body": "B", "head": "aw/x", "base": "main",
                     "draft": True}
+
+
+async def test_merge_pr_already_merged_returns_finalized():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PUT"
+        return httpx.Response(405, json={"message": "Pull Request is not mergeable"})
+
+    gh = GitHubClient("tok123")
+    gh._client = httpx.AsyncClient(
+        transport=_transport(handler), base_url="https://api.github.com")
+    try:
+        result = await gh.merge_pr("org/repo", 7)
+    finally:
+        await gh.aclose()
+    assert result == {"already_finalized": True}
+
+
+async def test_mark_ready_on_closed_pr_returns_finalized():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PATCH"
+        return httpx.Response(422, json={"message": "Validation Failed"})
+
+    gh = GitHubClient("tok123")
+    gh._client = httpx.AsyncClient(
+        transport=_transport(handler), base_url="https://api.github.com")
+    try:
+        result = await gh.mark_ready("org/repo", 7)
+    finally:
+        await gh.aclose()
+    assert result == {"already_finalized": True}
+
+
+async def test_merge_pr_other_status_still_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(409, json={"message": "conflict"})
+
+    gh = GitHubClient("tok123")
+    gh._client = httpx.AsyncClient(
+        transport=_transport(handler), base_url="https://api.github.com")
+    try:
+        try:
+            await gh.merge_pr("org/repo", 7)
+        except httpx.HTTPStatusError as exc:
+            assert exc.response.status_code == 409
+        else:
+            raise AssertionError("expected HTTPStatusError")
+    finally:
+        await gh.aclose()
