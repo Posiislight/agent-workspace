@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     maritime_base_url: str = "https://api.maritime.sh"
     maritime_template_id: str = ""
     github_pat: str = ""
+    github_webhook_secret: str = ""
+    merge_pr_when_ready: bool = False
 
     database_url: str = "postgresql://aw:aw@localhost:5433/agent_workspace"
     redis_url: str = "redis://localhost:6380/0"

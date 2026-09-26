@@ -7,3 +7,10 @@ def test_settings_defaults():
     assert s.sandbox_exec_timeout_seconds == 110
     assert s.model_coding_agent == "anthropic/claude-sonnet-4.5"
     assert s.test_command == "pytest -q"
+
+
+def test_github_phase2_settings_defaults():
+    from app.config import Settings
+    s = Settings(github_pat="p", github_webhook_secret="s")
+    assert s.github_webhook_secret == "s"
+    assert s.merge_pr_when_ready is False

@@ -1,0 +1,57 @@
+import httpx
+
+
+class GitHubClient:
+    """Minimal GitHub REST client for PR lifecycle (PAT auth)."""
+
+    def __init__(self, token: str, base_url: str = "https://api.github.com"):
+        self._token = token
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            timeout=30.0,
+        )
+
+    async def _request(self, method: str, path: str, **kwargs) -> dict:
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        resp = await self._client.request(method, path, headers=headers, **kwargs)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def find_open_pr(self, repo: str, head: str) -> dict | None:
+        pulls = await self._request(
+            "GET", f"/repos/{repo}/pulls",
+            params={"state": "open", "head": head})
+        return pulls[0] if pulls else None
+
+    async def create_pr(self, repo: str, *, title: str, body: str, head: str,
+                        base: str, draft: bool = True) -> dict:
+        return await self._request(
+            "POST", f"/repos/{repo}/pulls",
+        json={"title": title, "body": body,
+              "head": head.split(":", 1)[-1],
+              "base": base, "draft": draft})
+
+    async def mark_ready(self, repo: str, number: int) -> dict:
+        return await self._request(
+            "PATCH", f"/repos/{repo}/pulls/{number}", json={"draft": False})
+
+    async def add_comment(self, repo: str, number: int, body: str) -> dict:
+        return await self._request(
+            "POST", f"/repos/{repo}/issues/{number}/comments", json={"body": body})
+
+    async def merge_pr(self, repo: str, number: int) -> dict:
+        return await self._request(
+            "PUT", f"/repos/{repo}/pulls/{number}/merge",
+            json={"merge_method": "squash"})
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
