@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.db import list_tasks
 from app.events.sse import sse_events
 from app.graph.state import initial_state
 from app.services.run_manager import NotAwaitingApproval, TaskNotFound
@@ -39,6 +40,17 @@ async def create_task(body: TaskCreate, request: Request):
     await rm.prepare(task_id, st)
     await rm.start(task_id, st)
     return {"task_id": task_id}
+
+
+@router.get("")
+async def list_all(request: Request, limit: int = 100):
+    dsn = request.app.state.services.pg_dsn
+    rows = await list_tasks(dsn, limit=max(1, min(limit, 500)))
+    for r in rows:
+        for k in ("created_at", "updated_at"):
+            if r.get(k) is not None:
+                r[k] = r[k].isoformat()
+    return {"tasks": rows}
 
 
 @router.get("/{task_id}")

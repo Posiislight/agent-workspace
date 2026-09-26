@@ -14,6 +14,7 @@ def _as_ts(value):
 DDL = """CREATE TABLE IF NOT EXISTS tasks (
   task_id text PRIMARY KEY,
   repo text,
+  task_description text,
   status text,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz,
@@ -29,23 +30,37 @@ async def ensure_schema(dsn: str) -> None:
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute(DDL)
+        await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS task_description text")
     finally:
         await conn.close()
 
 
-async def upsert_task(dsn, task_id, repo, status, *, paused_at=None, resumed_at=None,
-                      cost_so_far=None, retry_counts=None, pr_url=None):
+async def upsert_task(dsn, task_id, repo, status, *, description=None, paused_at=None,
+                      resumed_at=None, cost_so_far=None, retry_counts=None, pr_url=None):
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute(
-            """INSERT INTO tasks (task_id, repo, status, updated_at, paused_at, resumed_at,
-                                   cost_so_far, retry_counts, pr_url)
-               VALUES ($1, $2, $3, now(), $4, $5, $6, $7::jsonb, $8)
+            """INSERT INTO tasks (task_id, repo, task_description, status, updated_at,
+                                   paused_at, resumed_at, cost_so_far, retry_counts, pr_url)
+               VALUES ($1, $2, $3, $4, now(), $5, $6, $7, $8::jsonb, $9)
                ON CONFLICT (task_id) DO UPDATE SET
-                 repo = $2, status = $3, updated_at = now(), paused_at = $4,
-                 resumed_at = $5, cost_so_far = $6, retry_counts = $7::jsonb, pr_url = $8""",
-            task_id, repo, status, _as_ts(paused_at), _as_ts(resumed_at), cost_so_far,
-            json.dumps(retry_counts or {}), pr_url)
+                 repo = $2, task_description = $3, status = $4, updated_at = now(),
+                 paused_at = $5, resumed_at = $6, cost_so_far = $7,
+                 retry_counts = $8::jsonb, pr_url = $9""",
+            task_id, repo, description, status, _as_ts(paused_at), _as_ts(resumed_at),
+            cost_so_far, json.dumps(retry_counts or {}), pr_url)
+    finally:
+        await conn.close()
+
+
+async def list_tasks(dsn, limit: int = 100):
+    conn = await asyncpg.connect(dsn)
+    try:
+        rows = await conn.fetch(
+            """SELECT task_id, repo, task_description, status, created_at, updated_at,
+                      cost_so_far, pr_url
+               FROM tasks ORDER BY created_at DESC LIMIT $1""", limit)
+        return [dict(r) for r in rows]
     finally:
         await conn.close()
 

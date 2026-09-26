@@ -163,7 +163,9 @@ class RunManager:
             await self.services.redis.set(f"aw:{task_id}:state", json.dumps(values))
         if self.services.pg_dsn:
             await upsert_task(self.services.pg_dsn, task_id, values.get("repo", ""),
-                              values.get("status", ""), paused_at=values.get("paused_at"),
+                              values.get("status", ""),
+                              description=values.get("task_description"),
+                              paused_at=values.get("paused_at"),
                               resumed_at=values.get("resumed_at"),
                               cost_so_far=values.get("cost_so_far"),
                               retry_counts=values.get("retry_counts"),

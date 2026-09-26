@@ -1,9 +1,11 @@
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 import redis.asyncio as aioredis
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes_tasks import router
 from app.config import get_settings
@@ -66,6 +68,12 @@ def create_app(services=None, graph=None) -> FastAPI:
         app.state.services = services
         app.state.run_manager = RunManager(services, graph)
     app.include_router(router)
+
+    # Serve the production frontend build (app/frontend/dist) at "/".
+    # Registered after the API router so /tasks* keeps priority.
+    dist = Path(__file__).resolve().parent / "frontend" / "dist"
+    if dist.is_dir():
+        app.mount("/", StaticFiles(directory=str(dist), html=True), name="frontend")
     return app
 
 
