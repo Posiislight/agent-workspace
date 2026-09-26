@@ -89,9 +89,18 @@ class RunManager:
                     values["paused_at"] = now_iso()
                     values["status"] = "awaiting_approval"
                     # A paused drive can never take another step, so vacate the
-                    # tracking slot BEFORE the mirror becomes observable: any
-                    # resume that sees awaiting_approval then sees no live drive.
+                    # tracking slot AND release the driving lock BEFORE the
+                    # mirror becomes observable: any resume that sees
+                    # awaiting_approval then acquires the lock and resumes
+                    # correctly, instead of hitting AlreadyRunning ->
+                    # _mirror_crash -> status "failed" (which would brick the
+                    # task: every later resume raises NotAwaitingApproval).
                     self._drives.pop(task_id, None)
+                    if self.services.redis is not None:
+                        try:
+                            await self.services.redis.delete(lock_key)
+                        except Exception:  # noqa: BLE001, S110 - best-effort
+                            pass
                     await self._mirror(task_id, values)
                     await self._emit(task_id, "human_approval", "node_started",
                                      {"paused_at": values["paused_at"], "paused": True})
@@ -99,15 +108,7 @@ class RunManager:
                         await self.services.sandbox_factory(values).sleep()
                     except Exception:  # noqa: BLE001, S110 - sleeping is best-effort
                         pass
-                    # A paused drive never drives again, so release the Redis
-                    # driving lock here; the finally-block only cleans up when
-                    # the drive loop exited without pausing (crash).
                     paused = True
-                    if self.services.redis is not None:
-                        try:
-                            await self.services.redis.delete(lock_key)
-                        except Exception:  # noqa: BLE001, S110 - best-effort
-                            pass
                 else:
                     await self._mirror(task_id, values)
         finally:
