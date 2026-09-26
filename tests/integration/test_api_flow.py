@@ -8,7 +8,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from app.events.publisher import EventPublisher
 from app.graph.build import build_graph
 from app.main import create_app
-from tests.fakes import StubLLM, make_services
+from tests.fakes import StubGitHub, StubLLM, make_services
 
 pytestmark = pytest.mark.integration
 
@@ -47,7 +47,7 @@ async def wait_status_matching(client, task_id, wanted, predicate, timeout=15.0)
 
 
 def make_app(redis_client, script):
-    services = make_services(llm=StubLLM(list(script)), publisher=EventPublisher(redis_client),
+    services = make_services(github=StubGitHub(), llm=StubLLM(list(script)), publisher=EventPublisher(redis_client),
                              redis=redis_client)
     graph = build_graph(services, InMemorySaver())
     return create_app(services=services, graph=graph), services

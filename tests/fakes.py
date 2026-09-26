@@ -170,6 +170,8 @@ class StubGitHub:
     async def create_pr(self, repo, *, title, body, head, base, draft=True):
         self.created_prs.append({"title": title, "body": body, "head": head,
                                  "base": base, "draft": draft})
+        owner = repo.split("/")[0]
+        self.existing_prs[f"{owner}:{head}"] = dict(self.created)
         return self.created
 
     async def mark_ready(self, repo, number):

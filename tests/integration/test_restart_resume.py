@@ -6,7 +6,7 @@ import pytest
 from app.db import ensure_schema, make_checkpointer
 from app.graph.build import build_graph
 from app.main import create_app
-from tests.fakes import FakePublisher, StubLLM, make_services
+from tests.fakes import FakePublisher, StubGitHub, StubLLM, make_services
 
 pytestmark = pytest.mark.integration
 
@@ -32,7 +32,7 @@ async def test_interrupt_survives_full_process_restart(settings, redis_client):
     await ensure_schema(settings.database_url)
 
     # --- process A: run to the approval interrupt, then "die" ---
-    services_a = make_services(llm=StubLLM(SCRIPT), publisher=FakePublisher(),
+    services_a = make_services(github=StubGitHub(), llm=StubLLM(SCRIPT), publisher=FakePublisher(),
                                redis=redis_client, pg_dsn=settings.database_url)
     cm_a = make_checkpointer(settings.database_url)
     checkpointer_a = await cm_a.__aenter__()
@@ -47,7 +47,7 @@ async def test_interrupt_survives_full_process_restart(settings, redis_client):
     await cm_a.__aexit__(None, None, None)  # process A exits
 
     # --- process B: brand-new graph + checkpointer over the SAME Postgres ---
-    services_b = make_services(publisher=FakePublisher(), redis=redis_client,
+    services_b = make_services(github=StubGitHub(), publisher=FakePublisher(), redis=redis_client,
                                pg_dsn=settings.database_url)  # no LLM needed post-approval
     cm_b = make_checkpointer(settings.database_url)
     checkpointer_b = await cm_b.__aenter__()

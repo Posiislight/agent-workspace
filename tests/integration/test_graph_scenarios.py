@@ -8,7 +8,7 @@ from app.graph.build import build_graph
 from app.graph.state import initial_state
 from app.sandbox.base import ExecResult
 from app.services.run_manager import RunManager
-from tests.fakes import StubLLM, StubSandbox, make_services
+from tests.fakes import StubGitHub, StubLLM, StubSandbox, make_services
 
 pytestmark = pytest.mark.integration
 
@@ -33,7 +33,7 @@ async def drive_to_interrupt(graph, tid, payload):
 
 
 async def test_happy_path_reaches_approval_interrupt():
-    services = make_services(llm=StubLLM(["PLAN: fix add", URLS, NOTES, OPS, APPROVED]),
+    services = make_services(github=StubGitHub(), llm=StubLLM(["PLAN: fix add", URLS, NOTES, OPS, APPROVED]),
                              sandbox=StubSandbox())  # default run result passes
     graph = build_graph(services, InMemorySaver())
     # Driven through RunManager so the pause path runs: the interrupted drive
@@ -50,7 +50,7 @@ async def test_happy_path_reaches_approval_interrupt():
 
 async def test_tester_failure_retries_coding_then_reaches_approval():
     sb = StubSandbox(run_results=[ExecResult(1, "FAILED tests/test_calc.py::test_add", "")])
-    services = make_services(llm=StubLLM(["PLAN", URLS, NOTES, OPS, OPS2, APPROVED]), sandbox=sb)
+    services = make_services(github=StubGitHub(), llm=StubLLM(["PLAN", URLS, NOTES, OPS, OPS2, APPROVED]), sandbox=sb)
     graph = build_graph(services, InMemorySaver())
     config = await drive_to_interrupt(graph, "s2", initial())
     state = (await graph.aget_state(config)).values
@@ -61,7 +61,7 @@ async def test_tester_failure_retries_coding_then_reaches_approval():
 
 async def test_tester_bound_exceeded_reaches_needs_human():
     sb = StubSandbox(default_run_result=ExecResult(1, "FAILED x::y", ""))
-    services = make_services(llm=StubLLM(["PLAN", URLS, NOTES, OPS, OPS, OPS2, OPS2, OPS2]),
+    services = make_services(github=StubGitHub(), llm=StubLLM(["PLAN", URLS, NOTES, OPS, OPS, OPS2, OPS2, OPS2]),
                              sandbox=sb)
     graph = build_graph(services, InMemorySaver())
     config = {"configurable": {"thread_id": "s3"}}
@@ -75,7 +75,7 @@ async def test_tester_bound_exceeded_reaches_needs_human():
 
 
 async def test_reviewer_rejection_retries_coding():
-    services = make_services(llm=StubLLM(["PLAN", URLS, NOTES, OPS,
+    services = make_services(github=StubGitHub(), llm=StubLLM(["PLAN", URLS, NOTES, OPS,
                                           NEEDS_CHANGES, OPS2, APPROVED]),
                              sandbox=StubSandbox())
     graph = build_graph(services, InMemorySaver())
@@ -86,7 +86,7 @@ async def test_reviewer_rejection_retries_coding():
 
 
 async def test_resume_approved_completes_done():
-    services = make_services(llm=StubLLM(["PLAN: fix add", URLS, NOTES, OPS, APPROVED]),
+    services = make_services(github=StubGitHub(), llm=StubLLM(["PLAN: fix add", URLS, NOTES, OPS, APPROVED]),
                              sandbox=StubSandbox())
     graph = build_graph(services, InMemorySaver())
     config = await drive_to_interrupt(graph, "s5", initial())
@@ -99,7 +99,7 @@ async def test_resume_approved_completes_done():
 
 
 async def test_resume_rejected_loops_to_planner_with_feedback():
-    services = make_services(llm=StubLLM(["PLAN", URLS, NOTES, OPS, APPROVED,
+    services = make_services(github=StubGitHub(), llm=StubLLM(["PLAN", URLS, NOTES, OPS, APPROVED,
                                           "REVISED PLAN", URLS, NOTES, OPS2, APPROVED]),
                              sandbox=StubSandbox())
     graph = build_graph(services, InMemorySaver())
