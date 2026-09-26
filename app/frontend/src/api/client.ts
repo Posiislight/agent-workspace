@@ -57,6 +57,9 @@ export const api = {
       body: JSON.stringify({ feedback }),
     }),
 
+  restart: (id: string) =>
+    request<unknown>(`/tasks/${id}/restart`, { method: "POST" }),
+
   artifacts: (id: string) => request<Artifacts>(`/tasks/${id}/artifacts`),
 
   eventsUrl: (id: string) => `/tasks/${id}/events`,

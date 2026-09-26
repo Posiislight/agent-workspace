@@ -8,7 +8,12 @@ from pydantic import BaseModel, Field
 from app.db import list_tasks
 from app.events.sse import sse_events
 from app.graph.state import initial_state
-from app.services.run_manager import NotAwaitingApproval, TaskNotFound
+from app.services.run_manager import (
+    AlreadyRunning,
+    NotAwaitingApproval,
+    NotRestartable,
+    TaskNotFound,
+)
 
 router = APIRouter(prefix="/tasks")
 
@@ -79,6 +84,17 @@ async def approve(task_id: str, request: Request, body: FeedbackBody | None = No
 @router.post("/{task_id}/reject", status_code=202)
 async def reject(task_id: str, request: Request, body: FeedbackBody | None = None):
     return await _resume(request, task_id, "rejected", (body.feedback if body else "") or "")
+
+
+@router.post("/{task_id}/restart", status_code=202)
+async def restart(task_id: str, request: Request):
+    try:
+        await request.app.state.run_manager.restart(task_id)
+    except TaskNotFound as e:
+        raise HTTPException(404, str(e)) from e
+    except (NotRestartable, NotAwaitingApproval, AlreadyRunning) as e:
+        raise HTTPException(409, str(e)) from e
+    return {"restarted": True}
 
 
 @router.get("/{task_id}/artifacts")

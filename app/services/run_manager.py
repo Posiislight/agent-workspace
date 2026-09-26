@@ -17,6 +17,10 @@ class NotAwaitingApproval(RuntimeError):
     pass
 
 
+class NotRestartable(RuntimeError):
+    pass
+
+
 class TaskNotFound(RuntimeError):
     pass
 
@@ -152,6 +156,20 @@ class RunManager:
             task_id, self.drive(task_id, Command(resume=payload,
                                                  update={"paused_at": paused,
                                                          "resumed_at": resumed})))
+
+    async def restart(self, task_id):
+        """Re-drive a failed/needs_human task from its last checkpoint."""
+        live = self._drives.get(task_id)
+        if live is not None and not live.done():
+            raise AlreadyRunning(task_id)
+        state = await self.get_state(task_id)
+        if not state:
+            raise TaskNotFound(task_id)
+        if state.get("status") not in ("failed", "needs_human"):
+            raise NotRestartable(task_id)
+        await self._emit(task_id, "run_manager", "node_started",
+                         {"restarted": True})
+        return self._spawn(task_id, self.drive(task_id, None))
 
     async def get_state(self, task_id):
         if self.services.redis is not None:

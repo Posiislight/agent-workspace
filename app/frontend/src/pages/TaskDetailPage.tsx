@@ -16,6 +16,7 @@ export default function TaskDetailPage() {
   const [connected, setConnected] = useState(false);
   const [deciding, setDeciding] = useState(false);
   const [decideError, setDecideError] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
   const refetch = useCallback(async () => {
@@ -63,6 +64,19 @@ export default function TaskDetailPage() {
     }
   };
 
+  const restart = async () => {
+    if (!taskId) return;
+    setRestarting(true);
+    setDecideError(null);
+    try {
+      await api.restart(taskId);
+    } catch (e) {
+      setDecideError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRestarting(false);
+    }
+  };
+
   if (task === "not-found")
     return (
       <div className="empty-state">
@@ -101,6 +115,18 @@ export default function TaskDetailPage() {
       <StageTimeline states={states} />
 
       {decideError && <p className="error-banner">{decideError}</p>}
+      {(task.status === "failed" || task.status === "needs_human") && (
+        <div className="card">
+          <p className="muted">
+            {task.status === "failed"
+              ? "The run crashed. Restarting re-drives the graph from its last checkpoint."
+              : "Retry bounds were exceeded. Restarting resumes from the last checkpoint."}
+          </p>
+          <button onClick={restart} disabled={restarting}>
+            {restarting ? "Restarting…" : "Restart from checkpoint"}
+          </button>
+        </div>
+      )}
       {awaiting && <ApprovalPrompt onDecide={decide} busy={deciding} />}
       {!awaiting && task.approval_status !== "pending" && (
         <p className="muted">
