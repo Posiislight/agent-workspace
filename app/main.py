@@ -13,7 +13,7 @@ from app.graph.nodes.helpers import Services
 from app.llm.openrouter import OpenRouterClient
 from app.llm.pricing import PriceTable
 from app.sandbox.computers import MaritimeComputers
-from app.sandbox.maritime import make_sandbox
+from app.sandbox.maritime import MaritimeSandbox, make_sandbox
 from app.services.run_manager import RunManager
 
 
@@ -26,17 +26,26 @@ def create_app(services=None, graph=None) -> FastAPI:
         settings = get_settings()
         redis = aioredis.Redis.from_url(settings.redis_url, decode_responses=True)
         await ensure_schema(settings.database_url)
-        http = httpx.AsyncClient(timeout=130)
-        prices = await PriceTable.fetch(http)
+        http_open = httpx.AsyncClient(base_url=settings.openrouter_base_url, timeout=130)
+        http_maritime = httpx.AsyncClient(base_url=settings.maritime_base_url, timeout=130)
+        prices = await PriceTable.fetch(http_open)
+        sandbox_cache: dict[str, MaritimeSandbox] = {}
+
+        def _sandbox_for(state):
+            tid = state["task_id"]
+            if tid not in sandbox_cache:
+                sandbox_cache[tid] = make_sandbox(settings, tid, state["repo"],
+                                                  state["base_branch"],
+                                                  client=http_maritime)
+            return sandbox_cache[tid]
+
         svc = Services(
             settings=settings,
-            llm=OpenRouterClient(settings.openrouter_api_key, settings.openrouter_base_url, http),
+            llm=OpenRouterClient(settings.openrouter_api_key, settings.openrouter_base_url, http_open),
             prices=prices,
             publisher=EventPublisher(redis),
-            sandbox_factory=lambda state: make_sandbox(settings, state["task_id"],
-                                                       state["repo"], state["base_branch"],
-                                                       client=http),
-            computers=MaritimeComputers(settings, http),
+            sandbox_factory=_sandbox_for,
+            computers=MaritimeComputers(settings, http_maritime),
             redis=redis,
             pg_dsn=settings.database_url,
         )
@@ -47,7 +56,8 @@ def create_app(services=None, graph=None) -> FastAPI:
         app.state.run_manager = RunManager(svc, build_graph(svc, checkpointer))
         yield
         await redis.aclose()
-        await http.aclose()
+        await http_open.aclose()
+        await http_maritime.aclose()
         await cm.__aexit__(None, None, None)
 
     app = FastAPI(title="agent-workspace", lifespan=lifespan)

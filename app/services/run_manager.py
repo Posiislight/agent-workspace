@@ -52,6 +52,19 @@ class RunManager:
         asyncio.create_task(
             self._emit(task_id, "run_manager", "node_completed",
                        {"error": repr(exc)}))
+        asyncio.create_task(self._mirror_crash(task_id, exc))
+
+    async def _mirror_crash(self, task_id, exc):
+        try:
+            state = await self.get_state(task_id) or {}
+            await self._mirror(task_id, {
+                **state,
+                "status": "failed",
+                "error_log": list(state.get("error_log") or [])
+                + [f"drive crashed: {exc!r}"],
+            })
+        except Exception:  # noqa: BLE001 - best-effort mirror; callback must not raise
+            pass
 
     async def start(self, task_id, initial_state_values):
         return self._spawn(task_id, self.drive(task_id, initial_state_values))
@@ -64,6 +77,7 @@ class RunManager:
                 raise AlreadyRunning(task_id)
         try:
             config = {"configurable": {"thread_id": task_id}}
+            paused = False
             async for chunk in self.graph.astream(graph_input, config, stream_mode="updates"):
                 snap = await self.graph.aget_state(config)
                 values = dict(snap.values) if snap and snap.values else {}
@@ -85,16 +99,29 @@ class RunManager:
                         await self.services.sandbox_factory(values).sleep()
                     except Exception:  # noqa: BLE001, S110 - sleeping is best-effort
                         pass
+                    # A paused drive never drives again, so release the Redis
+                    # driving lock here; the finally-block only cleans up when
+                    # the drive loop exited without pausing (crash).
+                    paused = True
+                    if self.services.redis is not None:
+                        try:
+                            await self.services.redis.delete(lock_key)
+                        except Exception:  # noqa: BLE001, S110 - best-effort
+                            pass
                 else:
                     await self._mirror(task_id, values)
         finally:
-            if self.services.redis is not None:
+            if self.services.redis is not None and not paused:
                 await self.services.redis.delete(lock_key)
 
     async def resume(self, task_id, decision, feedback=None):
         live = self._drives.get(task_id)
         if live is not None and not live.done() and task_id in self._resume_spawns:
             raise AlreadyRunning(task_id)
+        # Claim the resume marker BEFORE any await: a second resume arriving
+        # during the get_state/emit window must also hit the guard above,
+        # instead of sneaking through while the first resume is still awaiting.
+        self._resume_spawns.add(task_id)
         state = await self.get_state(task_id)
         if not state:
             raise TaskNotFound(task_id)
@@ -110,7 +137,6 @@ class RunManager:
                          {"paused_at": paused, "resumed_at": resumed,
                           "resume_latency_seconds": latency, "decision": decision})
         payload = {"decision": decision, "feedback": feedback or ""}
-        self._resume_spawns.add(task_id)
         return self._spawn(
             task_id, self.drive(task_id, Command(resume=payload,
                                                  update={"paused_at": paused,

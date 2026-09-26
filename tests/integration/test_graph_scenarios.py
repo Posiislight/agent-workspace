@@ -7,6 +7,7 @@ from langgraph.types import Command
 from app.graph.build import build_graph
 from app.graph.state import initial_state
 from app.sandbox.base import ExecResult
+from app.services.run_manager import RunManager
 from tests.fakes import StubLLM, StubSandbox, make_services
 
 pytestmark = pytest.mark.integration
@@ -35,11 +36,16 @@ async def test_happy_path_reaches_approval_interrupt():
     services = make_services(llm=StubLLM(["PLAN: fix add", URLS, NOTES, OPS, APPROVED]),
                              sandbox=StubSandbox())  # default run result passes
     graph = build_graph(services, InMemorySaver())
-    config = await drive_to_interrupt(graph, "s1", initial())
+    # Driven through RunManager so the pause path runs: the interrupted drive
+    # sleeps the shared sandbox instance (C2 smoke).
+    rm = RunManager(services, graph)
+    await rm.drive("s1", initial())
+    config = {"configurable": {"thread_id": "s1"}}
     state = (await graph.aget_state(config)).values
     assert state["code_diff"].startswith("diff --git")
     assert state["test_results"]["passed"] is True
     assert any(e.type == "cost_update" for e in services.publisher.events)
+    assert services.sandbox_factory(initial()).slept is True
 
 
 async def test_tester_failure_retries_coding_then_reaches_approval():

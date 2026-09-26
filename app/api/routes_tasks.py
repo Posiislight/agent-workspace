@@ -1,3 +1,4 @@
+import re
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request
@@ -27,6 +28,10 @@ class FeedbackBody(BaseModel):
 async def create_task(body: TaskCreate, request: Request):
     if "/" not in body.repo:
         raise HTTPException(422, "repo must look like org/name")
+    if not re.fullmatch(r"[\w.-]+/[\w.-]+", body.repo):
+        raise HTTPException(422, "repo must match org/name")
+    if not re.fullmatch(r"[\w./-]+", body.base_branch):
+        raise HTTPException(422, "invalid base_branch")
     task_id = uuid.uuid4().hex
     st = dict(initial_state(task_id, body.task_description, body.repo, body.base_branch,
                             body.test_command or "", body.model_overrides))

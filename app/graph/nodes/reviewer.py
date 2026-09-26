@@ -4,7 +4,7 @@ import re
 from langgraph.types import Command
 
 from app.graph.edges import route_after_reviewer
-from app.graph.nodes.helpers import apply_llm_cost, emit, model_for
+from app.graph.nodes.helpers import apply_llm_cost, chat_with_retry, emit
 
 REVIEWER_PROMPT = """You are the Reviewer agent. You review a code diff that has already passed
 tests. Check that it actually satisfies the original task (not just "tests
@@ -26,7 +26,7 @@ async def reviewer_node(state, *, services):
             f"ORIGINAL TASK:\n{state['task_description']}\n\nPLAN:\n{state.get('plan') or ''}\n\n"
             f"TEST RESULTS:\n{json.dumps(state.get('test_results'))}\n\nDIFF:\n{state.get('code_diff') or ''}"},
     ]
-    result = await services.llm.chat(model_for(services, state, "reviewer"), messages)
+    result = await chat_with_retry(services, state, "reviewer", messages)
     verdict, comments = _parse_verdict(result.text)
     updates = {"status": "reviewing",
                "approval_status": "approved" if verdict == "approved" else "needs_changes",

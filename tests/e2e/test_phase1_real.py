@@ -36,16 +36,25 @@ async def test_phase1_end_to_end():
 
     settings = get_settings()
     publisher = ListPublisher()
-    http = httpx.AsyncClient(timeout=130)
-    prices = await PriceTable.fetch(http)
+    http_open = httpx.AsyncClient(base_url=settings.openrouter_base_url, timeout=130)
+    http_maritime = httpx.AsyncClient(base_url=settings.maritime_base_url, timeout=130)
+    prices = await PriceTable.fetch(http_open)
+    sandbox_cache: dict[str, object] = {}
+
+    def _sandbox_for(st):
+        tid = st["task_id"]
+        if tid not in sandbox_cache:
+            sandbox_cache[tid] = make_sandbox(settings, tid, st["repo"], st["base_branch"],
+                                              client=http_maritime)
+        return sandbox_cache[tid]
+
     svc = Services(
         settings=settings,
-        llm=OpenRouterClient(settings.openrouter_api_key, settings.openrouter_base_url, http),
+        llm=OpenRouterClient(settings.openrouter_api_key, settings.openrouter_base_url, http_open),
         prices=prices,
         publisher=publisher,
-        sandbox_factory=lambda st: make_sandbox(settings, st["task_id"], st["repo"],
-                                                st["base_branch"], client=http),
-        computers=MaritimeComputers(settings, http),
+        sandbox_factory=_sandbox_for,
+        computers=MaritimeComputers(settings, http_maritime),
         redis=None,
     )
     graph = build_graph(svc, InMemorySaver())
@@ -73,3 +82,5 @@ async def test_phase1_end_to_end():
     snap = await graph.aget_state(config)
     assert snap.values["status"] == "done"
     assert snap.values["test_results"]["passed"] is True
+    await http_open.aclose()
+    await http_maritime.aclose()

@@ -1,6 +1,6 @@
 import shlex
 
-from app.graph.nodes.helpers import apply_llm_cost, emit, model_for
+from app.graph.nodes.helpers import apply_llm_cost, chat_with_retry, emit
 
 RESEARCHER_PROMPT = """You are the Researcher agent. You are given an implementation plan and must
 gather everything the Coding Agent will need to execute it correctly: exact
@@ -21,12 +21,11 @@ async def researcher_node(state, *, services):
     viewer = await services.computers.viewer_link(comp.computer_id, mode="watch")
     await emit(services, state, "researcher", "tool_call", {"viewer_url": viewer})
 
-    model = model_for(services, state, "researcher")
     base_messages = [
         {"role": "system", "content": RESEARCHER_PROMPT},
         {"role": "user", "content": f"PLAN:\n{state.get('plan') or ''}\n\nREPO: {state['repo']}"},
     ]
-    first = await services.llm.chat(model, base_messages)
+    first = await chat_with_retry(services, state, "researcher", base_messages)
     urls = [u for u in _urls(first.text)
             if u.startswith(("http://", "https://"))][:3]
 
@@ -38,7 +37,8 @@ async def researcher_node(state, *, services):
         excerpts.append(f"## {url}\n{await _fetch_excerpt(state, services, url)}")
 
     followup = "TOOL RESULTS:\n" + ("\n\n".join(excerpts) if excerpts else "No URLs found.")
-    second = await services.llm.chat(model, base_messages + [{"role": "user", "content": followup}])
+    second = await chat_with_retry(services, state, "researcher",
+                                   base_messages + [{"role": "user", "content": followup}])
     notes = ("### Sources consulted (live, in the headful browser)\n"
              + "\n".join(f"- {u}" for u in urls)
              + "\n\n" + second.text)

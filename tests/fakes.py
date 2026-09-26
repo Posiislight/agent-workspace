@@ -112,6 +112,25 @@ class StubComputers:
         pass
 
 
+class FakeRedis:
+    """Dict-backed async redis stub with the set/get/delete surface RunManager uses."""
+
+    def __init__(self):
+        self.store: dict[str, str] = {}
+
+    async def set(self, key, value, nx=False, ex=None):
+        if nx and key in self.store:
+            return False
+        self.store[key] = value
+        return True
+
+    async def get(self, key):
+        return self.store.get(key)
+
+    async def delete(self, key):
+        return self.store.pop(key, None) is not None
+
+
 def make_services(llm=None, sandbox=None, publisher=None, prices=None,
                   computers=None, settings=None, redis=None, pg_dsn=None) -> SimpleNamespace:
     """Build a Services namespace wired to fakes. sandbox_factory returns the shared stub."""

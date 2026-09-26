@@ -34,6 +34,14 @@ def model_for(services, state, role: str) -> str:
     return getattr(services.settings, f"model_{role}")
 
 
+async def chat_with_retry(services, state, role: str, messages: list[dict]):
+    from app.llm.backoff import with_retry
+    return await with_retry(
+        lambda: services.llm.chat(model_for(services, state, role), messages),
+        attempts=services.settings.backoff_attempts,
+        base_delay=services.settings.backoff_base_delay)
+
+
 async def apply_llm_cost(updates: dict, state, services, result, node: str) -> dict:
     delta = services.prices.cost(result.model, result.prompt_tokens, result.completion_tokens)
     total = round(state.get("cost_so_far", 0.0) + delta, 6)

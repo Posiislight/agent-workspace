@@ -1,4 +1,4 @@
-from app.graph.nodes.helpers import apply_llm_cost, emit, model_for
+from app.graph.nodes.helpers import apply_llm_cost, chat_with_retry, emit
 
 PLANNER_PROMPT = """You are the Planner agent in an automated engineering workflow. You do not write
 code. Given a task description and read-only access to the target repository,
@@ -24,7 +24,7 @@ async def planner_node(state, *, services):
             f"Repository: {state['repo']} (base branch {state['base_branch']})\n"
             f"File tree (depth 2):\n{tree}\n\nTask: {state['task_description']}{prior}"},
     ]
-    result = await services.llm.chat(model_for(services, state, "planner"), messages)
+    result = await chat_with_retry(services, state, "planner", messages)
     updates = {"plan": result.text, "status": "researching", "error_log": list(state["error_log"])}
     updates = await apply_llm_cost(updates, state, services, result, "planner")
     await emit(services, state, "planner", "node_completed", {"plan_chars": len(result.text)})

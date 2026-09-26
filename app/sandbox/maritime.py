@@ -1,4 +1,5 @@
 import asyncio
+import shlex
 import time
 
 import httpx
@@ -42,11 +43,16 @@ class MaritimeSandbox:
         return self.agent_id
 
     async def _provision(self):
-        clone_url = f"https://x-access-token:{self._s.github_pat}@github.com/{self.repo}.git"
+        repo = shlex.quote(self.repo)
+        branch = shlex.quote(self.base_branch)
+        clone_url = f"https://x-access-token:{self._s.github_pat}@github.com/{repo}.git"
         script = (
             f"set -e\n"
             f"if [ ! -d {WORKSPACE}/.git ]; then git clone {clone_url} {WORKSPACE} "
-            f"-b {self.base_branch}; fi\n"
+            f"-b {branch}; fi\n"
+            # PAT scrub: the clone URL embeds the token in .git/config; reset the
+            # remote to the plain HTTPS URL so it cannot be read back by the VM.
+            f"git -C {WORKSPACE} remote set-url origin https://github.com/{repo}.git\n"
             f"if [ ! -d {VENV} ]; then python3 -m venv {VENV}; fi\n"
             f"if [ -f {WORKSPACE}/requirements.txt ]; then "
             f"{VENV}/bin/pip install -q -r {WORKSPACE}/requirements.txt; fi\n"

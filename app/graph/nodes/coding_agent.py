@@ -3,7 +3,7 @@ import re
 
 from langgraph.types import Command
 
-from app.graph.nodes.helpers import apply_llm_cost, emit, model_for
+from app.graph.nodes.helpers import apply_llm_cost, chat_with_retry, emit
 
 CODING_AGENT_PROMPT = """You are the Coding Agent. You implement the given plan, using the research
 notes provided, inside an isolated sandbox with full read/write access to the
@@ -42,13 +42,12 @@ async def coding_agent_node(state, *, services):
         updates["retry_counts"] = {**state["retry_counts"],
                                    "testing": state["retry_counts"].get("testing", 0) + 1}
 
-    model = model_for(services, state, "coding_agent")
     messages = [{"role": "system", "content": CODING_AGENT_PROMPT},
                 {"role": "user", "content": _brief(state, context)}]
 
     bad_rounds = 0
     for _round in range(MAX_ROUNDS):
-        result = await services.llm.chat(model, messages)
+        result = await chat_with_retry(services, state, "coding_agent", messages)
         try:
             ops, done = _parse_round(result.text)
         except (ValueError, json.JSONDecodeError) as e:
