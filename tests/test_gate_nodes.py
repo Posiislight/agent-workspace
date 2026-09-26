@@ -50,10 +50,15 @@ async def test_needs_human_node():
 
 async def test_commit_pr_done():
     from app.graph.nodes.commit_pr import commit_pr_node
-    from tests.fakes import make_services
-    s = make_services()
-    updates = await commit_pr_node({"task_id": "t1", "approval_status": "approved"}, services=s)
+    from tests.fakes import StubGitHub, StubSandbox, make_services
+    s = make_services(github=StubGitHub(), sandbox=StubSandbox())
+    updates = await commit_pr_node(
+        {"task_id": "t1", "repo": "org/repo", "base_branch": "main",
+         "pr_url": "https://github.com/org/repo/pull/11", "pr_number": 11,
+         "approval_status": "approved", "cost_so_far": 0.0, "retry_counts": {}},
+        services=s)
     assert updates["status"] == "done"
+    assert updates["pr_url"] == "https://github.com/org/repo/pull/11"
 
 
 async def test_human_approval_opens_draft_pr_before_interrupt():
