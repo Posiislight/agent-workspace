@@ -3,4 +3,5 @@ __pycache__/
 .venv/
 .pytest_cache/
 *.egg-info/
-.ruff_cache/
+.ruff_cache/uvicorn.log
+uvicorn.err.log
