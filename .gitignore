@@ -5,6 +5,8 @@ __pycache__/
 *.egg-info/
 .ruff_cache/uvicorn.log
 uvicorn.err.log
+uvicorn.log
+
 
 node_modules/
 *.tsbuildinfo
