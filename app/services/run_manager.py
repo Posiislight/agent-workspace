@@ -82,6 +82,16 @@ class RunManager:
                 snap = await self.graph.aget_state(config)
                 values = dict(snap.values) if snap and snap.values else {}
                 if "__interrupt__" in chunk:
+                    # The PR is opened inside the human_approval node before the
+                    # interrupt fires, but its fields only land in graph state at
+                    # resume time — so pull them from the interrupt payload here,
+                    # otherwise the mirror has no pr_number and the webhook
+                    # route cannot resolve PR -> task.
+                    for intr in chunk["__interrupt__"]:
+                        pr = (getattr(intr, "value", None) or {}).get("pr")
+                        if pr:
+                            values["pr_url"] = pr["html_url"]
+                            values["pr_number"] = pr["number"]
                     # No aupdate_state here: any as_node-less update on an interrupted
                     # thread replaces the task's pending interrupt write, which would
                     # make Command(resume=...) a no-op. paused_at/status live in the
