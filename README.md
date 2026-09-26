@@ -17,4 +17,4 @@ headful browser) additionally require a paid Maritime plan.
 
 ## Run
 
-    .venv\Scripts\uvicorn app.main:app --port 8000
+    .venv\Scripts\python run.py
