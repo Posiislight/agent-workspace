@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -39,3 +40,22 @@ async def test_drive_accrues_vm_cost_and_mirrors_totals():
     assert mirrored["vm_cost"] == snap["vm_cost"]
     assert mirrored["vm_minutes"] == snap["vm_minutes"]
     assert services.cost._awake_since == {}  # window closed at drive end
+
+
+async def test_paused_approval_does_not_accrue_vm_minutes():
+    from tests.fakes import FakeRedis
+    redis = FakeRedis()
+    services = _services(redis)
+    graph = build_graph(services, InMemorySaver())
+    rm = RunManager(services, graph)
+    await rm.drive("t-vm-pause",
+                   dict(initial_state("t-vm-pause", "fix add", "org/repo",
+                                      "main", "pytest -q", {})))
+    mirrored = json.loads(await redis.get("aw:t-vm-pause:state"))
+    assert mirrored["status"] == "awaiting_approval"
+    assert services.cost._awake_since == {}  # window closed at pause
+    assert await services.cost.vm_awake_stop("t-vm-pause") == 0.0
+    snap1 = await services.cost.snapshot("t-vm-pause")
+    await asyncio.sleep(0.05)
+    snap2 = await services.cost.snapshot("t-vm-pause")
+    assert snap1["vm_minutes"] == snap2["vm_minutes"] > 0

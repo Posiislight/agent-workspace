@@ -67,7 +67,7 @@ class RunManager:
                 "error_log": list(state.get("error_log") or [])
                 + [f"drive crashed: {exc!r}"],
             })
-        except Exception:  # noqa: BLE001 - best-effort mirror; callback must not raise
+        except Exception:  # noqa: BLE001, S110 - best-effort mirror; callback must not raise
             pass
 
     async def start(self, task_id, initial_state_values):
@@ -208,8 +208,9 @@ class RunManager:
                             "vm_cost": snap["vm_cost"],
                             "vm_minutes": snap["vm_minutes"]}))
             pg_values = {**values, "cost_so_far": snap["llm_cost"],
-                         "vm_cost": snap["vm_cost"],
-                         "vm_minutes": snap["vm_minutes"]}
+                         "vm_cost": snap["vm_cost"] or pg_values.get("vm_cost"),
+                         "vm_minutes": snap["vm_minutes"]
+                         or pg_values.get("vm_minutes")}
         else:
             if self.services.redis is not None:
                 await self.services.redis.set(f"aw:{task_id}:state", json.dumps(values))
