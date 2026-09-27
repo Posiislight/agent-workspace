@@ -207,7 +207,9 @@ class RunManager:
                 json.dumps({**values, "llm_cost": snap["llm_cost"],
                             "vm_cost": snap["vm_cost"],
                             "vm_minutes": snap["vm_minutes"]}))
-            pg_values = {**values, "cost_so_far": snap["llm_cost"]}
+            pg_values = {**values, "cost_so_far": snap["llm_cost"],
+                         "vm_cost": snap["vm_cost"],
+                         "vm_minutes": snap["vm_minutes"]}
         else:
             if self.services.redis is not None:
                 await self.services.redis.set(f"aw:{task_id}:state", json.dumps(values))

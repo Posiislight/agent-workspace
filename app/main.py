@@ -18,6 +18,7 @@ from app.llm.openrouter import OpenRouterClient
 from app.llm.pricing import PriceTable
 from app.sandbox.computers import MaritimeComputers
 from app.sandbox.maritime import MaritimeSandbox, make_sandbox
+from app.services.cost_tracker import CostTracker
 from app.services.run_manager import RunManager
 
 
@@ -33,6 +34,7 @@ def create_app(services=None, graph=None) -> FastAPI:
         http_open = httpx.AsyncClient(base_url=settings.openrouter_base_url, timeout=130)
         http_maritime = httpx.AsyncClient(base_url=settings.maritime_base_url, timeout=130)
         prices = await PriceTable.fetch(http_open)
+        cost = CostTracker(redis, settings.vm_cost_per_hour)
         sandbox_cache: dict[str, MaritimeSandbox] = {}
 
         def _sandbox_for(state):
@@ -52,6 +54,7 @@ def create_app(services=None, graph=None) -> FastAPI:
             computers=MaritimeComputers(settings, http_maritime),
             redis=redis,
             pg_dsn=settings.database_url,
+            cost=cost,
         )
         cm = make_checkpointer(settings.database_url)
         checkpointer = await cm.__aenter__()
