@@ -43,6 +43,7 @@ export default function TaskListPage() {
           <th>Repo</th>
           <th>Description</th>
           <th>Stage</th>
+          <th>Cost</th>
           <th>Updated</th>
           <th>PR</th>
         </tr>
@@ -61,6 +62,9 @@ export default function TaskListPage() {
             </td>
             <td>
               <StatusChip status={t.status} />
+            </td>
+            <td className="muted mono">
+              {typeof t.cost_so_far === "number" ? `$${t.cost_so_far.toFixed(4)}` : "—"}
             </td>
             <td className="muted">
               {t.updated_at ? new Date(t.updated_at).toLocaleTimeString() : "—"}

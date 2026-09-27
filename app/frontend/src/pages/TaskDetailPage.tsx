@@ -106,6 +106,16 @@ export default function TaskDetailPage() {
             {task.pr_url} ↗
           </a>
         )}
+        {task.cost_so_far > 0 && (
+          <span className="chip cost" title="LLM cost so far">
+            ${task.cost_so_far.toFixed(4)}
+          </span>
+        )}
+        {(task.vm_cost ?? 0) > 0 && (
+          <span className="chip cost" title="VM awake-time cost">
+            +${task.vm_cost!.toFixed(4)} VM ({task.vm_minutes?.toFixed(1) ?? "0"} min)
+          </span>
+        )}
         <span className={`conn ${connected ? "on" : "off"}`} title="SSE stream">
           {connected ? "● live" : "○ reconnecting"}
         </span>

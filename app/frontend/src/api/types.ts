@@ -52,6 +52,9 @@ export interface TaskState {
   paused_at: string | null;
   resumed_at: string | null;
   pr_url: string | null;
+  vm_cost?: number;
+  vm_minutes?: number;
+  llm_cost?: number;
 }
 
 export interface TaskSummary {
@@ -62,6 +65,7 @@ export interface TaskSummary {
   created_at: string | null;
   updated_at: string | null;
   cost_so_far: number | null;
+  vm_cost?: number;
   pr_url: string | null;
 }
 

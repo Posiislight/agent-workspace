@@ -45,6 +45,25 @@ Once approved, the `commit_pr` node pushes the final branch, marks the PR ready
 (or squash-merges when `MERGE_PR_WHEN_READY=true`), and appends a final summary
 comment with total cost, retry cycles, and pause/resume timestamps.
 
+## Phase 3 — Cost tracking
+
+Cost accrues in real time while a task runs:
+
+- **Per-call LLM cost**: each model call records OpenRouter token usage, priced
+  against a price table fetched once at startup from OpenRouter's `/models`
+  endpoint. Every update is persisted with `INCRBYFLOAT aw:{id}:cost` and
+  broadcast as a `cost_update` SSE event.
+- **VM awake-minutes**: each graph drive opens an awake window on the task's VM;
+  time spent paused at the approval gate does not accrue. Minutes are stored in
+  `aw:{id}:vm_minutes` and multiplied by `VM_COST_PER_HOUR` ($/hour, default 0)
+  into `aw:{id}:vm_cost`.
+- **Final totals**: written to the tasks table (`vm_cost`, `vm_minutes` columns)
+  and into the final PR description and summary comment as an LLM/VM breakdown.
+
+Where to see it live: the task detail page cost chips (refreshed via SSE),
+`GET /tasks/{id}` (`llm_cost`, `vm_cost`, `vm_minutes`), and the Redis key
+`aw:{id}:cost`.
+
 ## Setup
 
 macOS / Linux:
