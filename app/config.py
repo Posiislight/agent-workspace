@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     maritime_api_key: str = ""
     maritime_base_url: str = "https://api.maritime.sh"
     maritime_template_id: str = ""
+    templates_allowlist: tuple[str, ...] = ("codex", "dsh")
     github_pat: str = ""
     github_webhook_secret: str = ""
     merge_pr_when_ready: bool = False

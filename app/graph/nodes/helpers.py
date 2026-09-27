@@ -21,7 +21,13 @@ class Services:
     pg_dsn: str | None = None
     github: object = None
     cost: object = None
+    agent: object = None
     clock: Callable[[], str] = field(default_factory=lambda: now_iso)
+
+
+def conversation_id(task_id: str, stage: str, retry: int = 0) -> str:
+    base = f"aw-{task_id}-{stage}"
+    return base if not retry else f"{base}-r{retry}"
 
 
 async def emit(services, state, node: str, type: str, data: dict):

@@ -136,9 +136,46 @@ class FakeRedis:
         return current
 
 
+class StubAgent:
+    """FIFO-scripted MaritimeAgentClient replacement. Records calls."""
+
+    def __init__(self, responses=None, agent_id="agent-1", compute_seconds=120.0):
+        self.agent_id = agent_id
+        self.responses = list(responses or [])
+        self.calls: list[dict] = []
+        self.created: list[str] = []   # template ids
+        self.waited: list[str] = []
+        self.slept: list[str] = []
+        self.compute_seconds = compute_seconds
+
+    async def create(self, name, template_id):
+        self.created.append(template_id)
+        return self.agent_id
+
+    async def wait_active(self, agent_id, timeout_s=180, poll_s=5):
+        self.waited.append(agent_id)
+        return agent_id
+
+    async def chat(self, agent_id, message, conversation_id, timeout_s=None):
+        self.calls.append({"agent_id": agent_id, "message": message,
+                           "conversation_id": conversation_id})
+        if not self.responses:
+            raise AssertionError("StubAgent exhausted — add scripted responses")
+        return self.responses.pop(0)
+
+    async def sleep(self, agent_id):
+        self.slept.append(agent_id)
+
+    async def total_compute_seconds(self, agent_id):
+        return self.compute_seconds
+
+    async def llm_status(self, agent_id):
+        return {"has_key": True, "using_maritime": True}
+
+
 def make_services(llm=None, sandbox=None, publisher=None, prices=None,
                   computers=None, settings=None, redis=None, pg_dsn=None,
-                  github=None, cost=None) -> SimpleNamespace:
+                  github=None, cost=None, agent=None) -> SimpleNamespace:
     """Build a Services namespace wired to fakes. sandbox_factory returns the shared stub."""
     from app.graph.nodes.helpers import Services
     from app.services.cost_tracker import CostTracker
@@ -158,6 +195,7 @@ def make_services(llm=None, sandbox=None, publisher=None, prices=None,
         pg_dsn=pg_dsn,
         github=github,
         cost=cost,
+        agent=agent or StubAgent(),
     )
 
 
