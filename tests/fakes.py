@@ -175,6 +175,7 @@ class StubGitHub:
         self.comments: list[tuple[int, str]] = []
         self.ready: list[int] = []
         self.merged: list[int] = []
+        self.updated_bodies: list[tuple[int, str]] = []
 
     async def find_open_pr(self, repo, head):
         return self.existing_prs.get(head)
@@ -188,6 +189,10 @@ class StubGitHub:
 
     async def mark_ready(self, repo, number):
         self.ready.append(number)
+        return {}
+
+    async def update_pr_body(self, repo, number, body):
+        self.updated_bodies.append((number, body))
         return {}
 
     async def list_comments(self, repo, number):

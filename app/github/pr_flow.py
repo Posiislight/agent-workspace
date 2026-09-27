@@ -30,6 +30,18 @@ def render_pr_body(state: dict) -> str:
     return "\n".join(lines)
 
 
+def render_final_body(state: dict, totals: dict) -> str:
+    body = render_pr_body({**state, "cost_so_far": totals.get("total", 0.0)})
+    return "\n".join([
+        body, "",
+        "## Final totals",
+        f"- LLM: ${totals.get('llm_cost', 0.0):.2f}",
+        f"- VM: ${totals.get('vm_cost', 0.0):.2f} "
+        f"({totals.get('vm_minutes', 0.0):.1f} min awake)",
+        f"- Total: ${totals.get('total', 0.0):.2f}",
+    ])
+
+
 async def ensure_draft_pr(services, state) -> dict:
     repo = state["repo"]
     branch = branch_for(state["task_id"])

@@ -1,11 +1,22 @@
-from app.github.pr_flow import ensure_draft_pr
+from app.github.pr_flow import ensure_draft_pr, render_final_body
 from app.github.push import branch_for, push_branch
 from app.graph.nodes.helpers import emit
 
 
+async def _totals(services, state) -> dict:
+    tracker = getattr(services, "cost", None)
+    if tracker is None or services.redis is None:
+        llm = state.get("cost_so_far", 0.0)
+        return {"llm_cost": llm, "vm_cost": 0.0, "vm_minutes": 0.0,
+                "total": round(llm, 6)}
+    snap = await tracker.snapshot(state["task_id"])
+    return {**snap, "total": round(snap["llm_cost"] + snap["vm_cost"], 6)}
+
+
 async def commit_pr_node(state, *, services):
     """Finalize (reachable only from an approved HumanApproval): push, mark
-    ready (or merge per config), append the final summary, mark done."""
+    ready (or merge per config), write final totals into the PR description,
+    append the summary comment, mark done."""
     await emit(services, state, "commit_pr", "node_started", {})
     github = services.github
     repo = state["repo"]
@@ -17,6 +28,9 @@ async def commit_pr_node(state, *, services):
               "draft": True}
     else:
         pr = await ensure_draft_pr(services, state)
+    totals = await _totals(services, state)
+    await github.update_pr_body(repo, pr["number"],
+                                render_final_body(state, totals))
     if services.settings.merge_pr_when_ready:
         await github.merge_pr(repo, pr["number"])
     else:
@@ -24,9 +38,11 @@ async def commit_pr_node(state, *, services):
     retries = state.get("retry_counts") or {}
     summary = "\n".join([
         "## Final summary",
-        f"- Total cost: ${state.get('cost_so_far', 0.0):.2f}",
-        (f"- Retry cycles: testing: {retries.get('testing', 0)}, "
-         f"coding: {retries.get('coding', 0)}"),
+        f"- Total cost: ${totals['total']:.2f}",
+        f"- LLM: ${totals['llm_cost']:.2f} · VM: ${totals['vm_cost']:.2f} "
+        f"({totals['vm_minutes']:.1f} awake min)",
+        f"- Retry cycles: testing: {retries.get('testing', 0)}, "
+        f"coding: {retries.get('coding', 0)}",
     ])
     if state.get("paused_at") and state.get("resumed_at"):
         summary += f"\n- Paused at: {state['paused_at']}, resumed at: {state['resumed_at']}"

@@ -52,6 +52,10 @@ class GitHubClient:
         return await self._request_idempotent_final(
             "PATCH", f"/repos/{repo}/pulls/{number}", json={"draft": False})
 
+    async def update_pr_body(self, repo: str, number: int, body: str) -> dict:
+        return await self._request("PATCH", f"/repos/{repo}/pulls/{number}",
+                                   json={"body": body})
+
     async def add_comment(self, repo: str, number: int, body: str) -> dict:
         return await self._request(
             "POST", f"/repos/{repo}/issues/{number}/comments", json={"body": body})

@@ -1,6 +1,6 @@
 from app.config import Settings
 from app.graph.nodes.commit_pr import commit_pr_node
-from tests.fakes import StubGitHub, StubSandbox, make_services
+from tests.fakes import FakeRedis, StubGitHub, StubSandbox, make_services
 
 
 def _state():
@@ -36,6 +36,39 @@ async def test_commit_pr_merges_when_configured():
         settings=Settings(github_pat="p", merge_pr_when_ready=True))
     await commit_pr_node(_state(), services=services)
     assert gh.merged == [11]
+
+
+async def test_commit_pr_updates_pr_body_with_final_totals():
+    gh = StubGitHub()
+    redis = FakeRedis()
+    services = make_services(github=gh, sandbox=StubSandbox(), redis=redis,
+                             settings=Settings(github_pat="p",
+                                               vm_cost_per_hour=6.0))
+    await services.cost.add_llm_cost("t1", 1.25)
+    await services.cost.add_vm_minutes("t1", 10.0)
+    state = {**_state(), "pr_url": "https://github.com/org/repo/pull/11",
+             "pr_number": 11}
+    result = await commit_pr_node(state, services=services)
+    assert result == {"status": "done",
+                      "pr_url": "https://github.com/org/repo/pull/11"}
+    assert gh.updated_bodies and gh.updated_bodies[0][0] == 11
+    body = gh.updated_bodies[0][1]
+    assert "## Final totals" in body
+    assert "$2.25" in body          # 1.25 LLM + 1.00 VM
+    summary = gh.comments[0][1]
+    assert "Total cost: $2.25" in summary
+    assert "VM: $1.00 (10.0 awake min)" in summary
+
+
+async def test_commit_pr_without_tracker_falls_back_to_state():
+    gh = StubGitHub()
+    services = make_services(github=gh, sandbox=StubSandbox())
+    services.cost = None
+    await commit_pr_node(_state(), services=services)
+    summary = gh.comments[0][1]
+    assert "Total cost: $1.25" in summary          # from state cost_so_far
+    assert "awake min" in summary
+    assert gh.updated_bodies[0][1].count("$1.25") >= 1
 
 
 async def test_commit_pr_skips_comment_when_final_summary_exists():
