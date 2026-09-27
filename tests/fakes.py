@@ -129,6 +129,12 @@ class FakeRedis:
     async def delete(self, key):
         return self.store.pop(key, None) is not None
 
+    async def incrbyfloat(self, key, amount):
+        current = float(self.store.get(key, 0.0) or 0.0)
+        current += float(amount)
+        self.store[key] = repr(current)
+        return current
+
 
 def make_services(llm=None, sandbox=None, publisher=None, prices=None,
                   computers=None, settings=None, redis=None, pg_dsn=None,

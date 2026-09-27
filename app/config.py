@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     github_pat: str = ""
     github_webhook_secret: str = ""
     merge_pr_when_ready: bool = False
+    vm_cost_per_hour: float = 0.0
 
     database_url: str = "postgresql://aw:aw@localhost:5433/agent_workspace"
     redis_url: str = "redis://localhost:6380/0"
