@@ -23,6 +23,7 @@ class MaritimeSandbox:
         self.repo = repo
         self.base_branch = base_branch
         self.agent_id: str | None = None
+        self._provisioned = False
 
     def _headers(self):
         return {"Authorization": f"Bearer {self._s.maritime_api_key}"}
@@ -31,6 +32,9 @@ class MaritimeSandbox:
         if self.agent_id:
             r = await self._client.get(f"/api/agents/{self.agent_id}", headers=self._headers())
             if r.status_code == 200:
+                if not getattr(self, "_provisioned", False):
+                    await self._provision()
+                    self._provisioned = True
                 return self.agent_id
             self.agent_id = None  # 404: VM deleted — recreate (spec §7)
         r = await with_retry(lambda: self._client.post(
@@ -40,6 +44,7 @@ class MaritimeSandbox:
         r.raise_for_status()
         self.agent_id = r.json()["id"]
         await self._provision()
+        self._provisioned = True
         return self.agent_id
 
     async def _provision(self):
@@ -127,6 +132,10 @@ class MaritimeSandbox:
         await self._client.post(f"/api/agents/{self.agent_id}/sleep", headers=self._headers())
 
 
-def make_sandbox(settings, task_id: str, repo: str, base_branch: str, client=None) -> MaritimeSandbox:
+def make_sandbox(settings, task_id: str, repo: str, base_branch: str,
+                 client=None, agent_id: str | None = None) -> MaritimeSandbox:
     client = client or httpx.AsyncClient(base_url=settings.maritime_base_url, timeout=130)
-    return MaritimeSandbox(settings, client, task_id, repo, base_branch)
+    sb = MaritimeSandbox(settings, client, task_id, repo, base_branch)
+    if agent_id:
+        sb.agent_id = agent_id
+    return sb

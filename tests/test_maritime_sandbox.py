@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from app.config import Settings
-from app.sandbox.maritime import MaritimeSandbox
+from app.sandbox.maritime import MaritimeSandbox, make_sandbox
 
 pytestmark = pytest.mark.integration
 
@@ -79,6 +79,35 @@ async def test_ensure_creates_then_reuses():
     aid2 = await sb.ensure()
     assert aid1 == aid2 == sb.agent_id
     assert m.agents[aid1]["name"] == "aw-task-t1"
+
+
+async def test_make_sandbox_binds_provided_agent_id():
+    m = MaritimeMock()
+    s, client, _sb = make(m)
+    sb = make_sandbox(s, "t1", "org/repo", "main", client=client, agent_id="a-pre")
+    assert sb.agent_id == "a-pre"
+
+
+async def test_ensure_provisions_into_preset_agent():
+    m = MaritimeMock()
+    s, client, _sb = make(m)
+    m.agents["a-pre"] = {"name": "aw-task-t1"}
+    sb = make_sandbox(s, "t1", "org/repo", "main", client=client, agent_id="a-pre")
+    aid = await sb.ensure()
+    assert aid == "a-pre"
+    assert set(m.agents) == {"a-pre"}
+    assert any("python3 -m venv" in c for c in m.exec_calls)
+
+
+async def test_ensure_preset_agent_does_not_reprovision():
+    m = MaritimeMock()
+    s, client, _sb = make(m)
+    m.agents["a-pre"] = {"name": "aw-task-t1"}
+    sb = make_sandbox(s, "t1", "org/repo", "main", client=client, agent_id="a-pre")
+    await sb.ensure()
+    calls_after_first = len(m.exec_calls)
+    assert await sb.ensure() == "a-pre"
+    assert len(m.exec_calls) == calls_after_first
 
 
 async def test_ensure_recreates_after_404():

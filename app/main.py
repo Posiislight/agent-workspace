@@ -42,7 +42,8 @@ def create_app(services=None, graph=None) -> FastAPI:
             if tid not in sandbox_cache:
                 sandbox_cache[tid] = make_sandbox(settings, tid, state["repo"],
                                                   state["base_branch"],
-                                                  client=http_maritime)
+                                                  client=http_maritime,
+                                                  agent_id=state.get("agent_id"))
             return sandbox_cache[tid]
 
         svc = Services(
