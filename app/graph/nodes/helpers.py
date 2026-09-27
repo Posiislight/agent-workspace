@@ -20,6 +20,7 @@ class Services:
     redis: object
     pg_dsn: str | None = None
     github: object = None
+    cost: object = None
     clock: Callable[[], str] = field(default_factory=lambda: now_iso)
 
 
@@ -47,6 +48,9 @@ async def apply_llm_cost(updates: dict, state, services, result, node: str) -> d
     delta = services.prices.cost(result.model, result.prompt_tokens, result.completion_tokens)
     total = round(state.get("cost_so_far", 0.0) + delta, 6)
     updates["cost_so_far"] = total
+    tracker = getattr(services, "cost", None)
+    if tracker is not None and delta:
+        await tracker.add_llm_cost(state["task_id"], delta)
     await emit(services, {**state, "cost_so_far": total}, node, "cost_update",
                {"cost_so_far": total})
     return updates

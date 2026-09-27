@@ -138,12 +138,15 @@ class FakeRedis:
 
 def make_services(llm=None, sandbox=None, publisher=None, prices=None,
                   computers=None, settings=None, redis=None, pg_dsn=None,
-                  github=None) -> SimpleNamespace:
+                  github=None, cost=None) -> SimpleNamespace:
     """Build a Services namespace wired to fakes. sandbox_factory returns the shared stub."""
     from app.graph.nodes.helpers import Services
+    from app.services.cost_tracker import CostTracker
 
     settings = settings or Settings()
     sandbox = sandbox or StubSandbox()
+    if cost is None and redis is not None:
+        cost = CostTracker(redis, settings.vm_cost_per_hour)
     return Services(
         settings=settings,
         llm=llm or StubLLM([]),
@@ -154,6 +157,7 @@ def make_services(llm=None, sandbox=None, publisher=None, prices=None,
         redis=redis,
         pg_dsn=pg_dsn,
         github=github,
+        cost=cost,
     )
 
 
