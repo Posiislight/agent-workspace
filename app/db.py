@@ -21,6 +21,8 @@ DDL = """CREATE TABLE IF NOT EXISTS tasks (
   paused_at timestamptz,
   resumed_at timestamptz,
   cost_so_far float8,
+  vm_cost float8,
+  vm_minutes float8,
   retry_counts jsonb,
   pr_url text,
   pr_number int
@@ -33,26 +35,30 @@ async def ensure_schema(dsn: str) -> None:
         await conn.execute(DDL)
         await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS task_description text")
         await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pr_number int")
+        await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS vm_cost float8")
+        await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS vm_minutes float8")
     finally:
         await conn.close()
 
 
 async def upsert_task(dsn, task_id, repo, status, *, description=None, paused_at=None,
                       resumed_at=None, cost_so_far=None, retry_counts=None, pr_url=None,
-                      pr_number=None):
+                      pr_number=None, vm_cost=None, vm_minutes=None):
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute(
             """INSERT INTO tasks (task_id, repo, task_description, status, updated_at,
                                    paused_at, resumed_at, cost_so_far, retry_counts, pr_url,
-                                   pr_number)
-               VALUES ($1, $2, $3, $4, now(), $5, $6, $7, $8::jsonb, $9, $10)
+                                   pr_number, vm_cost, vm_minutes)
+               VALUES ($1, $2, $3, $4, now(), $5, $6, $7, $8::jsonb, $9, $10, $11, $12)
                ON CONFLICT (task_id) DO UPDATE SET
                  repo = $2, task_description = $3, status = $4, updated_at = now(),
                  paused_at = $5, resumed_at = $6, cost_so_far = $7,
-                 retry_counts = $8::jsonb, pr_url = $9, pr_number = $10""",
+                 retry_counts = $8::jsonb, pr_url = $9, pr_number = $10,
+                 vm_cost = $11, vm_minutes = $12""",
             task_id, repo, description, status, _as_ts(paused_at), _as_ts(resumed_at),
-            cost_so_far, json.dumps(retry_counts or {}), pr_url, pr_number)
+            cost_so_far, json.dumps(retry_counts or {}), pr_url, pr_number,
+            vm_cost, vm_minutes)
     finally:
         await conn.close()
 
@@ -62,7 +68,7 @@ async def list_tasks(dsn, limit: int = 100):
     try:
         rows = await conn.fetch(
             """SELECT task_id, repo, task_description, status, created_at, updated_at,
-                      cost_so_far, pr_url
+                      cost_so_far, vm_cost, pr_url
                FROM tasks ORDER BY created_at DESC LIMIT $1""", limit)
         return [dict(r) for r in rows]
     finally:

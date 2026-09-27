@@ -33,3 +33,13 @@ async def test_pr_number_roundtrip_and_lookup(settings):
     assert row["task_id"] == "t-pr"
     assert row["pr_number"] == 9
     assert await get_task_by_pr(settings.database_url, "org/repo", 1234) is None
+
+
+async def test_vm_cost_columns_roundtrip(settings):
+    from app.db import ensure_schema, get_task, upsert_task
+    await ensure_schema(settings.database_url)
+    await upsert_task(settings.database_url, "t-vm2", "org/repo", "done",
+                      cost_so_far=1.25, vm_cost=1.0, vm_minutes=10.0)
+    row = await get_task(settings.database_url, "t-vm2")
+    assert row["vm_cost"] == 1.0
+    assert row["vm_minutes"] == 10.0

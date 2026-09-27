@@ -80,8 +80,12 @@ class RunManager:
             if not got:
                 raise AlreadyRunning(task_id)
         try:
+            tracker = getattr(self.services, "cost", None)
+            if tracker is not None:
+                tracker.vm_awake_start(task_id)
             config = {"configurable": {"thread_id": task_id}}
             paused = False
+            last_values = None
             async for chunk in self.graph.astream(graph_input, config, stream_mode="updates"):
                 snap = await self.graph.aget_state(config)
                 values = dict(snap.values) if snap and snap.values else {}
@@ -115,6 +119,8 @@ class RunManager:
                             await self.services.redis.delete(lock_key)
                         except Exception:  # noqa: BLE001, S110 - best-effort
                             pass
+                    if tracker is not None:
+                        await tracker.vm_awake_stop(task_id)
                     await self._mirror(task_id, values)
                     await self._emit(task_id, "human_approval", "node_started",
                                      {"paused_at": values["paused_at"], "paused": True})
@@ -125,7 +131,12 @@ class RunManager:
                     paused = True
                 else:
                     await self._mirror(task_id, values)
+                    last_values = values
         finally:
+            if tracker is not None:
+                await tracker.vm_awake_stop(task_id)
+            if not paused and last_values is not None:
+                await self._mirror(task_id, last_values)
             if self.services.redis is not None and not paused:
                 await self.services.redis.delete(lock_key)
 
@@ -187,18 +198,31 @@ class RunManager:
     async def _mirror(self, task_id, values):
         if not values:
             return
-        if self.services.redis is not None:
-            await self.services.redis.set(f"aw:{task_id}:state", json.dumps(values))
+        tracker = getattr(self.services, "cost", None)
+        pg_values = values
+        if tracker is not None and self.services.redis is not None:
+            snap = await tracker.snapshot(task_id)
+            await self.services.redis.set(
+                f"aw:{task_id}:state",
+                json.dumps({**values, "llm_cost": snap["llm_cost"],
+                            "vm_cost": snap["vm_cost"],
+                            "vm_minutes": snap["vm_minutes"]}))
+            pg_values = {**values, "cost_so_far": snap["llm_cost"]}
+        else:
+            if self.services.redis is not None:
+                await self.services.redis.set(f"aw:{task_id}:state", json.dumps(values))
         if self.services.pg_dsn:
-            await upsert_task(self.services.pg_dsn, task_id, values.get("repo", ""),
-                              values.get("status", ""),
-                              description=values.get("task_description"),
-                              paused_at=values.get("paused_at"),
-                              resumed_at=values.get("resumed_at"),
-                              cost_so_far=values.get("cost_so_far"),
-                              retry_counts=values.get("retry_counts"),
-                              pr_url=values.get("pr_url"),
-                              pr_number=values.get("pr_number"))
+            await upsert_task(self.services.pg_dsn, task_id, pg_values.get("repo", ""),
+                              pg_values.get("status", ""),
+                              description=pg_values.get("task_description"),
+                              paused_at=pg_values.get("paused_at"),
+                              resumed_at=pg_values.get("resumed_at"),
+                              cost_so_far=pg_values.get("cost_so_far"),
+                              retry_counts=pg_values.get("retry_counts"),
+                              pr_url=pg_values.get("pr_url"),
+                              pr_number=pg_values.get("pr_number"),
+                              vm_cost=pg_values.get("vm_cost"),
+                              vm_minutes=pg_values.get("vm_minutes"))
 
     async def _emit(self, task_id, node, type, data):
         await self.services.publisher.publish(
