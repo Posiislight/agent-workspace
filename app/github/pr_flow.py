@@ -36,8 +36,8 @@ def render_final_body(state: dict, totals: dict) -> str:
         body, "",
         "## Final totals",
         f"- LLM: ${totals.get('llm_cost', 0.0):.2f}",
-        f"- VM: ${totals.get('vm_cost', 0.0):.2f} "
-        f"({totals.get('vm_minutes', 0.0):.1f} min awake)",
+        (f"- VM: ${totals.get('vm_cost', 0.0):.2f} "
+         f"({totals.get('vm_minutes', 0.0):.1f} min awake)"),
         f"- Total: ${totals.get('total', 0.0):.2f}",
     ])
 

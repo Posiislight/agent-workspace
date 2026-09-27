@@ -39,10 +39,10 @@ async def commit_pr_node(state, *, services):
     summary = "\n".join([
         "## Final summary",
         f"- Total cost: ${totals['total']:.2f}",
-        f"- LLM: ${totals['llm_cost']:.2f} · VM: ${totals['vm_cost']:.2f} "
-        f"({totals['vm_minutes']:.1f} awake min)",
-        f"- Retry cycles: testing: {retries.get('testing', 0)}, "
-        f"coding: {retries.get('coding', 0)}",
+        (f"- LLM: ${totals['llm_cost']:.2f} · VM: "
+         f"${totals['vm_cost']:.2f} ({totals['vm_minutes']:.1f} awake min)"),
+        (f"- Retry cycles: testing: {retries.get('testing', 0)}, "
+         f"coding: {retries.get('coding', 0)}"),
     ])
     if state.get("paused_at") and state.get("resumed_at"):
         summary += f"\n- Paused at: {state['paused_at']}, resumed at: {state['resumed_at']}"
