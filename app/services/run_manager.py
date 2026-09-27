@@ -84,6 +84,21 @@ class RunManager:
             if tracker is not None:
                 tracker.vm_awake_start(task_id)
             config = {"configurable": {"thread_id": task_id}}
+            agent = getattr(self.services, "agent", None)
+            agent_id = (graph_input.get("agent_id")
+                        if isinstance(graph_input, dict) else None)
+            if agent is not None and agent_id is None:
+                if isinstance(graph_input, dict):
+                    template = graph_input.get("template_id", "codex")
+                else:
+                    state = await self.get_state(task_id) or {}
+                    agent_id = state.get("agent_id")
+                    template = state.get("template_id", "codex")
+                if agent_id is None:
+                    agent_id = await agent.create(f"aw-task-{task_id}", template)
+                    await agent.wait_active(agent_id)
+            if isinstance(graph_input, dict):
+                graph_input = {**graph_input, "agent_id": agent_id}
             paused = False
             last_values = None
             async for chunk in self.graph.astream(graph_input, config, stream_mode="updates"):
@@ -128,6 +143,11 @@ class RunManager:
                         await self.services.sandbox_factory(values).sleep()
                     except Exception:  # noqa: BLE001, S110 - sleeping is best-effort
                         pass
+                    if agent is not None and agent_id:
+                        try:
+                            await agent.sleep(agent_id)
+                        except Exception:  # noqa: BLE001, S110 - best-effort
+                            pass
                     paused = True
                 else:
                     await self._mirror(task_id, values)
@@ -139,6 +159,11 @@ class RunManager:
                 await self._mirror(task_id, last_values)
             if self.services.redis is not None and not paused:
                 await self.services.redis.delete(lock_key)
+            if agent is not None and agent_id and not paused:
+                try:
+                    await agent.sleep(agent_id)
+                except Exception:  # noqa: BLE001, S110 - best-effort
+                    pass
 
     async def resume(self, task_id, decision, feedback=None):
         live = self._drives.get(task_id)
