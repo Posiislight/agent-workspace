@@ -1,5 +1,4 @@
 import asyncio
-import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from tests.fakes import FakeRedis, StubAgent, StubSandbox, make_services
@@ -38,3 +37,18 @@ async def test_drive_creates_and_sleeps_agent():
     assert agent.created == ["codex"]
     assert agent.waited == ["agent-1"]
     assert agent.slept == ["agent-1"]
+
+
+async def test_restart_drive_recovers_agent_without_recreating():
+    agent = StubAgent()
+    s = make_services(agent=agent, redis=FakeRedis(), sandbox=StubSandbox())
+    from app.services.run_manager import RunManager
+    rm = RunManager(s, make_one_node_graph())
+    st = make_state()
+    await rm.prepare("t-agent", st)
+    await rm.start("t-agent", st)
+    await asyncio.wait_for(rm._drives["t-agent"], timeout=5)
+    await rm.drive("t-agent", None)
+    assert agent.created == ["codex"]
+    assert agent.waited == ["agent-1"]
+    assert agent.slept == ["agent-1", "agent-1"]
