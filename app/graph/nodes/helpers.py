@@ -12,8 +12,6 @@ def now_iso() -> str:
 @dataclass
 class Services:
     settings: object
-    llm: object
-    prices: object
     publisher: object
     sandbox_factory: Callable
     computers: object
@@ -22,6 +20,8 @@ class Services:
     github: object = None
     cost: object = None
     agent: object = None
+    llm: object = None
+    prices: object = None
     clock: Callable[[], str] = field(default_factory=lambda: now_iso)
 
 
@@ -33,30 +33,3 @@ def conversation_id(task_id: str, stage: str, retry: int = 0) -> str:
 async def emit(services, state, node: str, type: str, data: dict):
     await services.publisher.publish(
         Event(task_id=state["task_id"], node=node, type=type, data=data))
-
-
-def model_for(services, state, role: str) -> str:
-    override = (state.get("model_overrides") or {}).get(role)
-    if override:
-        return override
-    return getattr(services.settings, f"model_{role}")
-
-
-async def chat_with_retry(services, state, role: str, messages: list[dict]):
-    from app.llm.backoff import with_retry
-    return await with_retry(
-        lambda: services.llm.chat(model_for(services, state, role), messages),
-        attempts=services.settings.backoff_attempts,
-        base_delay=services.settings.backoff_base_delay)
-
-
-async def apply_llm_cost(updates: dict, state, services, result, node: str) -> dict:
-    delta = services.prices.cost(result.model, result.prompt_tokens, result.completion_tokens)
-    total = round(state.get("cost_so_far", 0.0) + delta, 6)
-    updates["cost_so_far"] = total
-    tracker = getattr(services, "cost", None)
-    if tracker is not None and delta:
-        await tracker.add_llm_cost(state["task_id"], delta)
-    await emit(services, {**state, "cost_so_far": total}, node, "cost_update",
-               {"cost_so_far": total})
-    return updates

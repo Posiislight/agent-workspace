@@ -229,10 +229,12 @@ class RunManager:
             snap = await tracker.snapshot(task_id)
             await self.services.redis.set(
                 f"aw:{task_id}:state",
-                json.dumps({**values, "llm_cost": snap["llm_cost"],
+                json.dumps({**values, "cost_so_far": snap["vm_cost"] or 0.0,
+                            "llm_cost": 0.0,
                             "vm_cost": snap["vm_cost"],
                             "vm_minutes": snap["vm_minutes"]}))
-            pg_values = {**values, "cost_so_far": snap["llm_cost"],
+            pg_values = {**values, "cost_so_far": snap["vm_cost"] or 0.0,
+                         "llm_cost": 0.0,
                          "vm_cost": snap["vm_cost"] or pg_values.get("vm_cost"),
                          "vm_minutes": snap["vm_minutes"]
                          or pg_values.get("vm_minutes")}

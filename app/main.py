@@ -8,16 +8,16 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.api import routes_webhooks
+from app.api import routes_meta
 from app.api.routes_tasks import router
 from app.config import get_settings
 from app.db import ensure_schema, make_checkpointer
 from app.events.publisher import EventPublisher
 from app.graph.build import build_graph
 from app.graph.nodes.helpers import Services
-from app.llm.openrouter import OpenRouterClient
-from app.llm.pricing import PriceTable
 from app.sandbox.computers import MaritimeComputers
 from app.sandbox.maritime import MaritimeSandbox, make_sandbox
+from app.sandbox.maritime_agent import MaritimeAgentClient
 from app.services.cost_tracker import CostTracker
 from app.services.run_manager import RunManager
 
@@ -31,9 +31,7 @@ def create_app(services=None, graph=None) -> FastAPI:
         settings = get_settings()
         redis = aioredis.Redis.from_url(settings.redis_url, decode_responses=True)
         await ensure_schema(settings.database_url)
-        http_open = httpx.AsyncClient(base_url=settings.openrouter_base_url, timeout=130)
         http_maritime = httpx.AsyncClient(base_url=settings.maritime_base_url, timeout=130)
-        prices = await PriceTable.fetch(http_open)
         cost = CostTracker(redis, settings.vm_cost_per_hour)
         sandbox_cache: dict[str, MaritimeSandbox] = {}
 
@@ -46,16 +44,16 @@ def create_app(services=None, graph=None) -> FastAPI:
                                                   agent_id=state.get("agent_id"))
             return sandbox_cache[tid]
 
+        agent = MaritimeAgentClient(settings.maritime_api_key, client=http_maritime)
         svc = Services(
             settings=settings,
-            llm=OpenRouterClient(settings.openrouter_api_key, settings.openrouter_base_url, http_open),
-            prices=prices,
             publisher=EventPublisher(redis),
             sandbox_factory=_sandbox_for,
             computers=MaritimeComputers(settings, http_maritime),
             redis=redis,
             pg_dsn=settings.database_url,
             cost=cost,
+            agent=agent,
         )
         cm = make_checkpointer(settings.database_url)
         checkpointer = await cm.__aenter__()
@@ -64,7 +62,6 @@ def create_app(services=None, graph=None) -> FastAPI:
         app.state.run_manager = RunManager(svc, build_graph(svc, checkpointer))
         yield
         await redis.aclose()
-        await http_open.aclose()
         await http_maritime.aclose()
         await cm.__aexit__(None, None, None)
 
@@ -73,6 +70,7 @@ def create_app(services=None, graph=None) -> FastAPI:
         app.state.services = services
         app.state.run_manager = RunManager(services, graph)
     app.include_router(router)
+    app.include_router(routes_meta.router)
     app.include_router(routes_webhooks.router)
 
     # Serve the production frontend build (app/frontend/dist) at "/".

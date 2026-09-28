@@ -35,6 +35,7 @@ async def test_drive_accrues_vm_cost_and_mirrors_totals():
     assert snap["vm_cost"] > 0
     mirrored = json.loads(await redis.get("aw:t-vm:state"))
     assert mirrored["llm_cost"] == snap["llm_cost"]
+    assert mirrored["cost_so_far"] == snap["vm_cost"]  # cost is VM-only
     assert mirrored["vm_cost"] == snap["vm_cost"]
     assert mirrored["vm_minutes"] == snap["vm_minutes"]
     assert services.cost._awake_since == {}  # window closed at drive end

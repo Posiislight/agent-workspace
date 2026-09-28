@@ -19,8 +19,6 @@ PLAN:
 RESEARCH NOTES:
 {notes}"""
 
-MAX_ROUNDS = 8
-
 
 async def coding_agent_node(state, *, services):
     await emit(services, state, "coding_agent", "node_started", {})

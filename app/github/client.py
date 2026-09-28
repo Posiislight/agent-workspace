@@ -34,6 +34,28 @@ class GitHubClient:
                 return {"already_finalized": True}
             raise
 
+    async def list_repos(self) -> list[dict]:
+        """List repos accessible to the PAT (paginated)."""
+        repos: list[dict] = []
+        page = 1
+        while True:
+            batch = await self._request(
+                "GET", "/user/repos",
+                params={"per_page": 100, "page": page, "sort": "updated",
+                        "affiliation": "owner,collaborator,organization_member"})
+            if not batch:
+                break
+            repos.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+        return [
+            {"full_name": r["full_name"],
+             "private": r.get("private", False),
+             "default_branch": r.get("default_branch") or "main"}
+            for r in repos
+        ]
+
     async def find_open_pr(self, repo: str, head: str) -> dict | None:
         pulls = await self._request(
             "GET", f"/repos/{repo}/pulls",
