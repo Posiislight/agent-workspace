@@ -6,6 +6,14 @@ import { deriveStageStates } from "../components/stages";
 import StageTimeline from "../components/StageTimeline";
 import ApprovalPrompt from "../components/ApprovalPrompt";
 import ArtifactsView from "../components/ArtifactsView";
+import {
+  BudgetMeter,
+  BudgetPrompt,
+  FollowupChat,
+  Scoreboard,
+  VisualProofView,
+  WorkspaceStats,
+} from "../components/Phase4Panels";
 
 type NotFound = "not-found";
 
@@ -16,6 +24,8 @@ export default function TaskDetailPage() {
   const [connected, setConnected] = useState(false);
   const [deciding, setDeciding] = useState(false);
   const [decideError, setDecideError] = useState<string | null>(null);
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
   const refetch = useCallback(async () => {
@@ -63,6 +73,35 @@ export default function TaskDetailPage() {
     }
   };
 
+  const sendFollowup = async (message: string) => {
+    if (!taskId) return false;
+    setChatBusy(true);
+    setChatError(null);
+    try {
+      await api.followup(taskId, message);
+      await refetch();
+      return true;
+    } catch (e) {
+      setChatError(e instanceof Error ? e.message : String(e));
+      return false;
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
+  const raiseBudget = async (budget: number) => {
+    if (!taskId) return;
+    setDeciding(true);
+    setDecideError(null);
+    try {
+      await api.raiseBudget(taskId, budget);
+    } catch (e) {
+      setDecideError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeciding(false);
+    }
+  };
+
   if (task === "not-found")
     return (
       <div className="empty-state">
@@ -78,6 +117,7 @@ export default function TaskDetailPage() {
   if (!task) return <p className="muted">Loading…</p>;
 
   const awaiting = task.status === "awaiting_approval";
+  const awaitingBudget = task.status === "awaiting_budget";
   const states = deriveStageStates(task);
 
   return (
@@ -85,6 +125,7 @@ export default function TaskDetailPage() {
       <div className="detail-head">
         <h2 className="mono">{task.task_id.slice(0, 8)}</h2>
         <span className={`chip status-${task.status}`}>{task.status.replace("_", " ")}</span>
+        {task.harness && <span className="chip mono">{task.harness}</span>}
         <span className="muted mono">{task.repo}</span>
         <span className="muted">base: {task.base_branch}</span>
         {task.pr_url && (
@@ -102,6 +143,22 @@ export default function TaskDetailPage() {
 
       {decideError && <p className="error-banner">{decideError}</p>}
       {awaiting && <ApprovalPrompt onDecide={decide} busy={deciding} />}
+      {awaitingBudget && (
+        <BudgetPrompt
+          task={task}
+          busy={deciding}
+          onRaise={raiseBudget}
+          onStop={() => decide("reject", "stopped at budget cap")}
+        />
+      )}
+
+      <div className="panels">
+        <BudgetMeter task={task} />
+        <WorkspaceStats metrics={task.workspace_metrics ?? []} harness={task.harness} />
+      </div>
+      <Scoreboard rows={task.candidate_results ?? []} />
+      <VisualProofView proof={task.visual_proof} />
+      <FollowupChat task={task} onSend={sendFollowup} busy={chatBusy} error={chatError} />
       {!awaiting && task.approval_status !== "pending" && (
         <p className="muted">
           Approval: <strong>{task.approval_status}</strong>

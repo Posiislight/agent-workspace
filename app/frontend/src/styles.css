@@ -173,3 +173,62 @@ pre {
 pre.diff { font-family: ui-monospace, Consolas, monospace; white-space: pre; }
 pre.err { color: var(--red); }
 .failing { color: var(--red); font-size: 0.85rem; }
+
+/* ---- phase 4/5 panels ---- */
+select {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 0.55rem 0.75rem;
+  font: inherit;
+  width: 100%;
+}
+.small { font-size: 0.8rem; }
+.panels { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+@media (max-width: 900px) { .panels { grid-template-columns: 1fr; } }
+.meter-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.meter-bar {
+  display: flex; height: 10px; border-radius: 999px; overflow: hidden;
+  background: var(--bg-soft); border: 1px solid var(--border); margin: 0.5rem 0;
+}
+.meter-llm { background: var(--accent); }
+.meter-vm { background: var(--purple); }
+.meter-bar.warn { border-color: var(--yellow); }
+.meter-bar.over { border-color: var(--red); }
+.meter-legend { font-size: 0.8rem; margin: 0.25rem 0 0; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.2rem; }
+.dot.llm { background: var(--accent); }
+.dot.vm { background: var(--purple); }
+.scoreboard tr.winner td { background: rgba(63, 185, 80, 0.08); }
+.scoreboard .add { color: var(--green); }
+.scoreboard .del { color: var(--red); }
+.winner-chip { margin-left: 0.5rem; color: var(--green); border-color: var(--green); }
+.cand-passed { color: var(--green); border-color: var(--green); }
+.cand-coding, .cand-testing { color: var(--accent); border-color: var(--accent); }
+.cand-failed, .cand-tests_failed, .cand-error { color: var(--red); border-color: var(--red); }
+.proof-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 700px) { .proof-grid { grid-template-columns: 1fr; } }
+.proof-grid figure { margin: 0; }
+.proof-grid img { width: 100%; border: 1px solid var(--border); border-radius: 6px; display: block; }
+.proof-grid figcaption { text-align: center; margin-top: 0.3rem; text-transform: uppercase; font-size: 0.75rem; }
+.ws-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.ws-list li { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: baseline; font-size: 0.85rem; }
+.chip.cold { color: var(--yellow); border-color: var(--yellow); }
+.chip.warm { color: var(--green); border-color: var(--green); }
+.chat-log { list-style: none; margin: 0.5rem 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.chat-log li { display: flex; gap: 0.6rem; align-items: baseline; font-size: 0.85rem; }
+.chat-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.src-ci { color: var(--red); border-color: var(--red); }
+.src-pr_comment { color: var(--purple); border-color: var(--purple); }
+.chat-form { display: flex; gap: 0.5rem; }
+.chat-form input { flex: 1; }
+.chat-form .btn { align-self: stretch; }
+.cand-row { flex-wrap: wrap; align-items: center; }
+.cand-row .chip .btn { padding: 0 0 0 0.35rem; }
+.ev-workspace_ready { color: var(--green); border-color: var(--green); }
+.ev-candidate_update { color: var(--accent); border-color: var(--accent); }
+.ev-followup { color: var(--purple); border-color: var(--purple); }
+.ev-budget_exceeded { color: var(--red); border-color: var(--red); }
+.status-awaiting_budget { color: var(--red); border-color: var(--red); }
+.table-scroll { overflow-x: auto; }

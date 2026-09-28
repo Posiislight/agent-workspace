@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import type { TaskCreateResponse } from "../api/types";
+import { HARNESSES } from "../api/types";
+import type { Harness, TaskCreateResponse } from "../api/types";
 
 interface OverrideRow {
   key: string;
@@ -15,6 +16,12 @@ export default function CreateTaskPage() {
   const [baseBranch, setBaseBranch] = useState("main");
   const [testCommand, setTestCommand] = useState("");
   const [overrides, setOverrides] = useState<OverrideRow[]>([]);
+  const [harness, setHarness] = useState<Harness>("openrouter");
+  const [candidates, setCandidates] = useState<Harness[]>([]);
+  const [budget, setBudget] = useState("");
+  const [previewCommand, setPreviewCommand] = useState("");
+  const [previewPort, setPreviewPort] = useState("8000");
+  const [previewPath, setPreviewPath] = useState("/");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,6 +48,12 @@ export default function CreateTaskPage() {
         base_branch: baseBranch.trim() || "main",
         test_command: testCommand.trim() || null,
         model_overrides,
+        harness,
+        candidates: candidates.length > 1 ? candidates : [],
+        budget_usd: budget.trim() ? Number(budget) : null,
+        preview_command: previewCommand.trim() || null,
+        preview_port: previewCommand.trim() ? Number(previewPort) || 8000 : null,
+        preview_path: previewCommand.trim() ? previewPath.trim() || "/" : null,
       });
       navigate(`/tasks/${res.task_id}`);
     } catch (err) {
@@ -89,6 +102,86 @@ export default function CreateTaskPage() {
           placeholder="pytest -x -q"
         />
       </label>
+
+      <div className="row">
+        <label>
+          Coding harness
+          <select value={harness} onChange={(e) => setHarness(e.target.value as Harness)}>
+            {HARNESSES.map((h) => (
+              <option key={h} value={h}>
+                {h}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Budget <span className="muted">(USD, optional)</span>
+          <input
+            type="number"
+            min="0"
+            step="0.05"
+            value={budget}
+            onChange={(e) => setBudget(e.target.value)}
+            placeholder="0.50"
+          />
+        </label>
+      </div>
+
+      <fieldset>
+        <legend>
+          Best-of-N <span className="muted">(2+ candidates race; 2 VMs awake at a time)</span>
+        </legend>
+        <div className="row cand-row">
+          {candidates.map((c, i) => (
+            <span key={i} className="chip mono">
+              {c}
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => setCandidates((cs) => cs.filter((_, idx) => idx !== i))}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+          {candidates.length < 4 &&
+            HARNESSES.map((h) => (
+              <button
+                type="button"
+                key={h}
+                className="btn ghost"
+                onClick={() => setCandidates((cs) => [...cs, h])}
+              >
+                + {h}
+              </button>
+            ))}
+        </div>
+        {candidates.length === 1 && <p className="muted small">Add at least two candidates.</p>}
+      </fieldset>
+
+      <fieldset>
+        <legend>
+          Visual proof <span className="muted">(optional — or put a preview block in .aw.json)</span>
+        </legend>
+        <div className="row">
+          <label>
+            Start command
+            <input
+              value={previewCommand}
+              onChange={(e) => setPreviewCommand(e.target.value)}
+              placeholder="python -m http.server 8000"
+            />
+          </label>
+          <label>
+            Port
+            <input value={previewPort} onChange={(e) => setPreviewPort(e.target.value)} />
+          </label>
+          <label>
+            Path
+            <input value={previewPath} onChange={(e) => setPreviewPath(e.target.value)} />
+          </label>
+        </div>
+      </fieldset>
 
       <fieldset>
         <legend>

@@ -7,6 +7,14 @@ import type {
   TaskSummary,
 } from "./types";
 
+export interface WorkspacesView {
+  max_awake_vms: number | null;
+  max_running_computers: number | null;
+  awake: Record<string, string>;
+  computers: string[];
+  agents: { agent: string; agent_id: string | null; awake: boolean; owner: string | null; active_task: string | null }[];
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -57,6 +65,20 @@ export const api = {
       body: JSON.stringify({ feedback }),
     }),
 
+  followup: (id: string, message: string) =>
+    request<unknown>(`/tasks/${id}/followups`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+
+  raiseBudget: (id: string, budget_usd: number) =>
+    request<unknown>(`/tasks/${id}/budget`, {
+      method: "POST",
+      body: JSON.stringify({ budget_usd }),
+    }),
+
+  workspaces: () => request<WorkspacesView>("/workspaces"),
+
   artifacts: (id: string) => request<Artifacts>(`/tasks/${id}/artifacts`),
 
   eventsUrl: (id: string) => `/tasks/${id}/events`,
@@ -69,6 +91,10 @@ const EVENT_TYPES = [
   "tool_call",
   "cost_update",
   "sleep_wake",
+  "workspace_ready",
+  "candidate_update",
+  "followup",
+  "budget_exceeded",
 ] as const;
 
 export function subscribeToEvents(

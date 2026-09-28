@@ -5,12 +5,21 @@ export type TaskStatus =
   | "testing"
   | "reviewing"
   | "awaiting_approval"
+  | "awaiting_budget"
   | "committing"
   | "done"
   | "failed"
   | "needs_human";
 
-export type StageId = "planner" | "researcher" | "coding" | "tester" | "reviewer" | "human_approval" | "commit_pr";
+export type StageId =
+  | "planner"
+  | "researcher"
+  | "coding"
+  | "tester"
+  | "reviewer"
+  | "visual_proof"
+  | "human_approval"
+  | "commit_pr";
 
 export type StageState = "pending" | "running" | "done" | "failed";
 
@@ -20,6 +29,53 @@ export interface TaskCreateRequest {
   base_branch: string;
   test_command?: string | null;
   model_overrides?: Record<string, string>;
+  harness?: Harness;
+  candidates?: Harness[];
+  budget_usd?: number | null;
+  preview_command?: string | null;
+  preview_port?: number | null;
+  preview_path?: string | null;
+}
+
+export type Harness = "openrouter" | "dsh" | "codex";
+export const HARNESSES: Harness[] = ["openrouter", "dsh", "codex"];
+
+export interface CandidateRow {
+  index: number;
+  harness: Harness;
+  slot: number;
+  status: string;
+  tests_passed: boolean | null;
+  files: number;
+  insertions: number;
+  deletions: number;
+  seconds: number;
+  vm_seconds: number;
+  score: number | null;
+  winner: boolean;
+  error?: string;
+}
+
+export interface WorkspaceMetric {
+  agent: string;
+  cold: boolean;
+  switched_branch: boolean;
+  deps: string;
+  queued_seconds: number;
+  ready_seconds: number;
+}
+
+export interface FollowupEntry {
+  source: "chat" | "pr_comment" | "ci" | string;
+  instruction: string;
+  at: string;
+}
+
+export interface VisualProof {
+  preview?: { command: string; port: number; path: string };
+  images: { before?: string; after?: string };
+  github?: { before: string; after: string } | null;
+  error?: string;
 }
 
 export interface TaskCreateResponse {
@@ -52,6 +108,19 @@ export interface TaskState {
   paused_at: string | null;
   resumed_at: string | null;
   pr_url: string | null;
+  pr_number?: number | null;
+  harness?: Harness;
+  workspace_slot?: number;
+  workspace_metrics?: WorkspaceMetric[];
+  candidates?: Harness[];
+  candidate_results?: CandidateRow[];
+  followups?: FollowupEntry[];
+  ci_fix_attempts?: number;
+  budget_usd?: number;
+  llm_cost?: number;
+  vm_seconds?: number;
+  vm_cost?: number;
+  visual_proof?: VisualProof | null;
 }
 
 export interface TaskSummary {
@@ -87,6 +156,7 @@ export const STAGES: { id: StageId; label: string }[] = [
   { id: "coding", label: "Coding" },
   { id: "tester", label: "Tester" },
   { id: "reviewer", label: "Reviewer" },
+  { id: "visual_proof", label: "Visual proof" },
   { id: "human_approval", label: "Approval" },
   { id: "commit_pr", label: "Commit & PR" },
 ];
@@ -98,6 +168,7 @@ export const STATUS_TO_STAGE: Partial<Record<TaskStatus, StageId>> = {
   testing: "tester",
   reviewing: "reviewer",
   awaiting_approval: "human_approval",
+  awaiting_budget: "coding",
   committing: "commit_pr",
   done: "commit_pr",
   needs_human: "human_approval",

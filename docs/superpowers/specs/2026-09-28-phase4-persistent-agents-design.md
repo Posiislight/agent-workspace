@@ -160,8 +160,10 @@ Task request `candidates: ["codex", "codex", "dsh"]`. Graph: Researcher → `bes
 - Judge: reviewer model gets the passing candidates' diffs and returns
   `{"winner": i, "scores": {...}, "rationale": "..."}`. Fallback: first passing, then fewest
   changed lines. No candidate passes → `needs_human`.
-- The winner's slot becomes `state.workspace_slot` / `state.harness`; the graph continues at
-  the Tester (re-validating in the winner workspace) → Reviewer → … as usual.
+- The winner's slot becomes `state.workspace_slot` / `state.harness`, its test run becomes
+  `state.test_results`, and the graph continues at the Reviewer (the winner already passed
+  the suite in its own workspace) → Visual Proof → … as usual. Later retries use the
+  winner's harness and workspace.
 
 ## 10. Budget cap
 

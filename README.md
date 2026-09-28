@@ -14,11 +14,27 @@ Implemented today (phase 1 — orchestrator core):
 - Postgres checkpointing + tasks index table; Redis event bus (Streams → SSE)
 - Maritime micro-VM per task (warm reuse across retries, sleep at approval)
 
-In progress / planned (see `docs/superpowers/`):
+Phase 2 — GitHub approval loop (below).
 
-- Phase 2 — GitHub approval loop: draft PR at the approval gate, approve/reject via
-  GitHub webhooks, Commit & PR finalization
-- Phase 3 — cost tracking (per-call LLM cost, VM awake-minutes, audit rows)
+Phase 4/5 — persistent repo agents (spec:
+`docs/superpowers/specs/2026-09-28-phase4-persistent-agents-design.md`):
+
+- **Lease scheduler** — at most 2 awake VMs and 1 running Maritime computer (plan
+  limits); sleeping VMs are free, waiting tasks show `queued_for_vm`
+- **Repo agent that remembers** — one sleeping VM per `(repo, template, slot)`, reused
+  across tasks: warm deps (cached by `requirements.txt` hash), a memory file the Planner
+  reads, and cold-vs-warm startup measured on every task (`workspace_ready` events)
+- **Harness layer** — `openrouter` (built-in loop), `dsh` and `codex` Maritime templates
+  run headless in the workspace
+- **Keep chatting after the PR** — chat box / `POST /tasks/{id}/followups`, `/aw …` PR
+  comments, and failed CI checks wake the same agent on the same branch
+- **Visual proof** — before/after screenshots of the running app from the Maritime
+  computer, embedded in the PR
+- **Best-of-N** — up to 4 candidates race (2 awake at a time), a judge picks the winner,
+  live scoreboard
+- **Budget cap** — live LLM + VM-minute meter; the task sleeps and asks before overspending
+
+Not built (considered and dropped): fan-out/integrator, rewind/time-travel.
 
 ## Phase 2 — GitHub approval loop
 
@@ -44,6 +60,25 @@ Deciding from GitHub itself:
 Once approved, the `commit_pr` node pushes the final branch, marks the PR ready
 (or squash-merges when `MERGE_PR_WHEN_READY=true`), and appends a final summary
 comment with total cost, retry cycles, and pause/resume timestamps.
+
+## Phase 4/5 — persistent agents
+
+Task options (`POST /tasks`): `harness` (`openrouter` | `dsh` | `codex`), `candidates`
+(e.g. `["codex", "codex", "dsh"]` for Best-of-3), `budget_usd`, and `preview_command` /
+`preview_port` / `preview_path` for visual proof. Visual proof can also come from the repo:
+
+    // .aw.json
+    {"preview": {"command": "python app.py", "port": 8000, "path": "/"}}
+
+Follow-ups: type in the task page's chat box, or comment `/aw make it async` on the PR.
+Add **Check runs** and **Pull request review comments** to the webhook events to enable
+CI self-heal (capped by `CI_AUTOFIX_MAX_ATTEMPTS`) and inline `/aw` review comments.
+
+Harness templates: verify ids with `curl https://api.maritime.sh/api/templates` and set
+`MARITIME_TEMPLATE_DSH` / `MARITIME_TEMPLATE_CODEX`; the CLI invocations are
+`HARNESS_CMD_DSH` / `HARNESS_CMD_CODEX` (`{brief}` = path of the task brief in the VM), and
+`HARNESS_ENV` (JSON) seeds the harness VMs' model keys. `GET /workspaces` shows the lease
+pool and which repo agents are awake.
 
 ## Setup
 
