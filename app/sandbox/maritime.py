@@ -10,6 +10,11 @@ from app.sandbox.base import ExecResult
 RUNS_DIR = "/data/.runs"
 WORKSPACE = "/data/workspace"
 VENV = "/data/venv"
+UV_DIR = "/data/.uv"
+UV = f"{UV_DIR}/bin/uv"
+# Written once the venv is known-good; venvs without it (e.g. a stdlib venv
+# built on a python lacking ensurepip) are rebuilt on the next provision.
+VENV_OK = f"{VENV}/.aw-ok"
 
 
 class MaritimeSandbox:
@@ -58,10 +63,18 @@ class MaritimeSandbox:
             # PAT scrub: the clone URL embeds the token in .git/config; reset the
             # remote to the plain HTTPS URL so it cannot be read back by the VM.
             f"git -C {WORKSPACE} remote set-url origin https://github.com/{repo}.git\n"
-            f"if [ ! -d {VENV} ]; then python3 -m venv {VENV}; fi\n"
-            f"if [ -f {WORKSPACE}/requirements.txt ]; then "
-            f"{VENV}/bin/pip install -q -r {WORKSPACE}/requirements.txt; fi\n"
             f"mkdir -p {RUNS_DIR}\n"
+            # Template images differ (codex: Debian python without pip/venv;
+            # dsh: Nix python). uv is a static binary that builds a working
+            # venv on either, so prefer it and fall back to stdlib venv.
+            # Repo deps are installed per test run by sync_deps().
+            f"export UV_CACHE_DIR={UV_DIR}/cache\n"
+            f"if [ ! -x {UV} ]; then curl -LsSf https://astral.sh/uv/install.sh "
+            f"| env UV_INSTALL_DIR={UV_DIR}/bin UV_NO_MODIFY_PATH=1 sh >/dev/null 2>&1 "
+            f"|| true; fi\n"
+            f"if [ ! -f {VENV_OK} ]; then rm -rf {VENV}; "
+            f"if [ -x {UV} ]; then {UV} venv {VENV} -q; else python3 -m venv {VENV}; fi; "
+            f"touch {VENV_OK}; fi\n"
         )
         res = await self.exec(script)
         if res.exit_code != 0:
@@ -82,7 +95,10 @@ class MaritimeSandbox:
         run_id = f"{int(time.time() * 1000)}-{self.task_id}"
         log, codef = f"{RUNS_DIR}/{run_id}.log", f"{RUNS_DIR}/{run_id}.code"
         launch = (f"cd {WORKSPACE} && mkdir -p {RUNS_DIR} && nohup bash -c "
-                  f"'source {VENV}/bin/activate 2>/dev/null; {command}; echo $? > {codef}' "
+                  # PATH instead of `source activate`: a missing activate script
+                  # used to fail silently and run tests on the system python.
+                  f"'export PATH={VENV}/bin:$PATH VIRTUAL_ENV={VENV}; "
+                  f"{command}; echo $? > {codef}' "
                   f"> {log} 2>&1 & echo $!")
         started = await self.exec(launch, timeout=30)
         if started.exit_code != 0 or not started.stdout.strip():
@@ -108,15 +124,22 @@ class MaritimeSandbox:
     async def sync_deps(self) -> ExecResult:
         """Install repo deps into the venv before each test run.
 
-        Provisioning only installs what existed at clone time; the harness may
-        add requirements files (or the repo may have none), so re-sync here and
-        guarantee pytest is present for the default test command.
+        The harness may add requirements files (or the repo may have none), so
+        re-sync every run and guarantee pytest is present for the default test
+        command. No `exit` here: run_long needs the trailing `echo $?` to run.
         """
         script = (
+            f"export UV_CACHE_DIR={UV_DIR}/cache; "
+            f"if [ -x {UV} ]; then PIP=\"{UV} pip install -q --python {VENV}/bin/python\"; "
+            f"else PIP=\"{VENV}/bin/python -m pip install -q\"; fi; "
+            f"rc=0; "
             f"for f in requirements.txt requirements-dev.txt; do "
-            f"if [ -f \"$f\" ]; then {VENV}/bin/pip install -q -r \"$f\"; fi; done; "
-            f"{VENV}/bin/python -m pytest --version >/dev/null 2>&1 "
-            f"|| {VENV}/bin/pip install -q pytest"
+            f"if [ -f \"$f\" ]; then $PIP -r \"$f\" || rc=1; fi; done; "
+            # Best-effort: many pyproject.toml files only configure tools.
+            f"if [ -f pyproject.toml ] || [ -f setup.py ]; then $PIP -e . >/dev/null 2>&1 "
+            f"|| echo \"note: editable install of project skipped\"; fi; "
+            f"{VENV}/bin/python -m pytest --version >/dev/null 2>&1 || $PIP pytest || rc=1; "
+            f"test $rc -eq 0"
         )
         return await self.run_long(script)
 

@@ -96,7 +96,7 @@ async def test_ensure_provisions_into_preset_agent():
     aid = await sb.ensure()
     assert aid == "a-pre"
     assert set(m.agents) == {"a-pre"}
-    assert any("python3 -m venv" in c for c in m.exec_calls)
+    assert any("git clone" in c for c in m.exec_calls)
 
 
 async def test_ensure_preset_agent_does_not_reprovision():
@@ -124,8 +124,23 @@ async def test_provision_installs_venv_and_runs_dir():
     m = MaritimeMock()
     _s, _c, sb = make(m)
     await sb.ensure()
-    script = [c for c in m.exec_calls if "python3 -m venv" in c]
+    script = [c for c in m.exec_calls if "git clone" in c]
     assert script and "mkdir -p /data/.runs" in script[0]
+    # uv gives a working venv on every template image (codex's Debian python
+    # has no pip/ensurepip); stdlib venv is only the offline fallback.
+    assert "astral.sh/uv/install.sh" in script[0]
+    assert "/data/.uv/bin/uv venv /data/venv" in script[0]
+    assert "python3 -m venv" in script[0]
+
+
+async def test_run_long_puts_venv_on_path_without_activate():
+    m = MaritimeMock()
+    _s, _c, sb = make(m)
+    await sb.ensure()
+    await sb.run_long("pytest -q", timeout=10)
+    launch = [c for c in m.exec_calls if "nohup" in c][0]
+    assert "PATH=/data/venv/bin:$PATH" in launch
+    assert "activate" not in launch
 
 
 async def test_run_long_returns_log_output():
@@ -167,6 +182,7 @@ async def test_sync_deps_installs_requirements_and_pytest():
     res = await s.sync_deps()
     assert res.exit_code == 0
     cmd = seen[0]
-    assert "requirements.txt" in cmd
-    assert "-m pytest --version" in cmd and "pip install -q pytest" in cmd
+    assert "/data/.uv/bin/uv pip install" in cmd
+    assert "requirements.txt" in cmd and "pyproject.toml" in cmd
+    assert "pytest" in cmd
     assert "'" not in cmd  # run_long wraps the command in single quotes

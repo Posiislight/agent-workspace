@@ -46,3 +46,17 @@ async def test_syncs_deps_before_running_tests():
     await tester_node(_tester_state(), services=s)
     assert sb.deps_synced == 1
     assert sb.run_calls == ["pytest -q"]
+
+
+async def test_dependency_failure_is_reported_instead_of_running_tests():
+    from app.graph.nodes.tester import tester_node
+    sb = StubSandbox()
+    sb.sync_result = ExecResult(1, "", "No solution found: foo==9.9")
+    s = make_services(sandbox=sb)
+    res = await tester_node(_tester_state(), services=s)
+    tr = res.update["test_results"]
+    assert tr["passed"] is False
+    assert tr["failing_output"].startswith("dependency install failed")
+    assert "foo==9.9" in tr["failing_output"]
+    assert sb.run_calls == []
+    assert res.goto == "coding_agent"
