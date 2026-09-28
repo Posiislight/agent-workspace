@@ -1,10 +1,12 @@
+import re
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 import redis.asyncio as aioredis
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import routes_webhooks
@@ -20,6 +22,11 @@ from app.sandbox.maritime import MaritimeSandbox, make_sandbox
 from app.sandbox.maritime_agent import MaritimeAgentClient
 from app.services.cost_tracker import CostTracker
 from app.services.run_manager import RunManager
+
+FRONTEND_DIST = Path(__file__).resolve().parent / "frontend" / "dist"
+# Client-side routes that share a path with the API (/tasks/{id}) or have no
+# file in dist (/new). Browser navigations to these get index.html.
+_SPA_ROUTE = re.compile(r"^/(new|tasks/[^/]+)/?$")
 
 
 def create_app(services=None, graph=None) -> FastAPI:
@@ -75,8 +82,20 @@ def create_app(services=None, graph=None) -> FastAPI:
 
     # Serve the production frontend build (app/frontend/dist) at "/".
     # Registered after the API router so /tasks* keeps priority.
-    dist = Path(__file__).resolve().parent / "frontend" / "dist"
+    dist = FRONTEND_DIST
     if dist.is_dir():
+        index = dist / "index.html"
+
+        @app.middleware("http")
+        async def spa_navigation(request: Request, call_next):
+            # Only real page loads ask for text/html; fetch()/EventSource do
+            # not, so the same /tasks/{id} path still returns JSON to the app.
+            if (request.method == "GET" and index.is_file()
+                    and "text/html" in request.headers.get("accept", "")
+                    and _SPA_ROUTE.match(request.url.path)):
+                return FileResponse(index)
+            return await call_next(request)
+
         app.mount("/", StaticFiles(directory=str(dist), html=True), name="frontend")
     return app
 
