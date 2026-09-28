@@ -1,4 +1,5 @@
 import asyncio
+import re
 
 import httpx
 
@@ -9,6 +10,21 @@ class AgentTimeout(RuntimeError):
     pass
 
 
+# Harness chat is async under the hood: after ~25s the gateway replies with an
+# acknowledgement while the harness keeps working; messages to that
+# conversation then get a "still working" reply until the answer is ready, and
+# the next message after completion receives it. Other conversations are
+# unaffected. (Verified against live codex/dsh agents; not in Maritime docs.)
+_PENDING = re.compile(
+    r"^\s*(I'm on it\b.*message me again|Still working on your last request\b)",
+    re.I | re.S)
+_NUDGE = "Are you finished? If so, reply with your complete answer to my previous request."
+
+
+def is_pending_reply(text: str | None) -> bool:
+    return bool(text) and bool(_PENDING.match(text))
+
+
 class MaritimeAgentClient:
     """Maritime REST wrapper: agent lifecycle + harness chat (LLM proxy)."""
 
@@ -17,6 +33,7 @@ class MaritimeAgentClient:
             base_url="https://api.maritime.sh", timeout=600)
         self._headers = {"Authorization": f"Bearer {api_key}"}
         self._retry_base = 1.0
+        self._poll_s = 10.0
 
     async def _req(self, method: str, path: str, **kw) -> httpx.Response:
         return await self._client.request(method, path, headers=self._headers, **kw)
@@ -46,14 +63,37 @@ class MaritimeAgentClient:
             await asyncio.sleep(poll_s)
 
     async def chat(self, agent_id: str, message: str, conversation_id: str,
-                   timeout_s: int = 600) -> str:
+                   timeout_s: float = 1800) -> str:
+        """Send `message` and return the harness's final answer.
+
+        Polls the same conversation through ack/"still working" replies until
+        the real answer arrives or `timeout_s` elapses (AgentTimeout).
+        """
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout_s
+        reply = await self._chat_once(agent_id, message, conversation_id)
+        while is_pending_reply(reply):
+            if loop.time() >= deadline:
+                raise AgentTimeout(
+                    f"agent {agent_id} still working on {conversation_id} "
+                    f"after {timeout_s}s")
+            await asyncio.sleep(self._poll_s)
+            reply = await self._chat_once(agent_id, _NUDGE, conversation_id)
+        return reply
+
+    async def _chat_once(self, agent_id: str, message: str, conversation_id: str) -> str:
         async def _call() -> str:
             r = await self._req("POST", f"/api/agents/{agent_id}/chat",
                                 json={"message": message,
                                       "conversation_id": conversation_id},
-                                timeout=timeout_s)
+                                timeout=180)
             r.raise_for_status()
-            return r.json()["response"]
+            d = r.json()
+            if d.get("response") is None:
+                raise RuntimeError(f"agent chat error: {d.get('error') or d}")
+            return d["response"]
+        # A retried POST after a gateway error is safe: if the first attempt
+        # is still running, the harness answers "still working" and we poll.
         return await with_retry(_call, base_delay=self._retry_base)
 
     async def llm_status(self, agent_id: str) -> dict:

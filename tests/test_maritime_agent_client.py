@@ -70,3 +70,41 @@ async def test_sleep_and_compute_seconds():
     c = make_client(handler)
     await c.sleep("a-1")
     assert await c.total_compute_seconds("a-1") == 125.0
+
+
+ACK = ("I'm on it. This needs more than a few seconds; message me again shortly "
+       "and I'll have your answer ready.")
+BUSY = "Still working on your last request. Message me again in a moment and I'll have the answer."
+
+
+async def test_chat_polls_through_ack_and_busy_until_real_answer():
+    replies = [ACK, BUSY, BUSY, "REAL ANSWER"]
+    seen = []
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        seen.append((body["message"], body["conversation_id"]))
+        return httpx.Response(200, json={"response": replies.pop(0)})
+    c = make_client(handler)
+    c._poll_s = 0
+    assert await c.chat("a-1", "do the work", "conv-9") == "REAL ANSWER"
+    assert seen[0] == ("do the work", "conv-9")
+    # follow-ups nudge the SAME conversation, never resend the task
+    assert all(cid == "conv-9" and msg != "do the work" for msg, cid in seen[1:])
+    assert len(seen) == 4
+
+
+async def test_chat_gives_up_when_agent_stays_busy():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"response": BUSY})
+    c = make_client(handler)
+    c._poll_s = 0.01
+    with pytest.raises(AgentTimeout):
+        await c.chat("a-1", "m", "c", timeout_s=0.1)
+
+
+async def test_chat_raises_on_error_payload():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"response": None, "error": "harness crashed"})
+    c = make_client(handler)
+    with pytest.raises(RuntimeError, match="harness crashed"):
+        await c.chat("a-1", "m", "c")
