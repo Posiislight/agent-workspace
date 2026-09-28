@@ -1,18 +1,21 @@
+from tests.fakes import StubAgent, make_services
+
 from app.graph.nodes.researcher import researcher_node
-from tests.fakes import StubLLM, make_services
 
 FIRST = "URL: https://docs.example.com/api\nURL: https://docs.example.com/guide"
 NOTES = "### Notes\n- API takes ints (docs.example.com/api)"
 
 
-def researcher_state():
-    return {"task_id": "t1", "repo": "org/repo", "plan": "PLAN", "model_overrides": {},
-            "cost_so_far": 0.0, "error_log": []}
+def researcher_state(**kw):
+    st = {"task_id": "t1", "repo": "org/repo", "plan": "PLAN",
+          "agent_id": "agent-1", "template_id": "codex", "error_log": []}
+    st.update(kw)
+    return st
 
 
 async def test_researcher_visits_urls_and_writes_notes():
-    llm = StubLLM([FIRST, NOTES])
-    s = make_services(llm=llm)
+    stub = StubAgent(responses=[FIRST, NOTES])
+    s = make_services(agent=stub)
     updates = await researcher_node(researcher_state(), services=s)
     assert updates["computer_id"] == s.computers.computer_id
     assert updates["research_notes"].startswith("### Sources consulted")
@@ -23,3 +26,7 @@ async def test_researcher_visits_urls_and_writes_notes():
     assert any(e.data.get("viewer_url") for e in tool)
     assert sum(1 for e in tool if e.data.get("action") == "browser_open") == 2
     assert updates["status"] == "coding"
+    assert len(stub.calls) == 2
+    assert stub.calls[0]["conversation_id"] == "aw-t1-researcher"
+    assert stub.calls[1]["conversation_id"] == "aw-t1-researcher"
+    assert "TOOL RESULTS:" in stub.calls[1]["message"]

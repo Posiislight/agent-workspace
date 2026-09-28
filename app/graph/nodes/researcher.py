@@ -1,6 +1,6 @@
 import shlex
 
-from app.graph.nodes.helpers import apply_llm_cost, chat_with_retry, emit
+from app.graph.nodes.helpers import conversation_id, emit
 
 RESEARCHER_PROMPT = """You are the Researcher agent. You are given an implementation plan and must
 gather everything the Coding Agent will need to execute it correctly: exact
@@ -21,12 +21,10 @@ async def researcher_node(state, *, services):
     viewer = await services.computers.viewer_link(comp.computer_id, mode="watch")
     await emit(services, state, "researcher", "tool_call", {"viewer_url": viewer})
 
-    base_messages = [
-        {"role": "system", "content": RESEARCHER_PROMPT},
-        {"role": "user", "content": f"PLAN:\n{state.get('plan') or ''}\n\nREPO: {state['repo']}"},
-    ]
-    first = await chat_with_retry(services, state, "researcher", base_messages)
-    urls = [u for u in _urls(first.text)
+    prompt = RESEARCHER_PROMPT + "\n\n" + f"PLAN:\n{state.get('plan') or ''}\n\nREPO: {state['repo']}"
+    cid = conversation_id(state["task_id"], "researcher", 0)
+    first = await services.agent.chat(state["agent_id"], prompt, cid)
+    urls = [u for u in _urls(first)
             if u.startswith(("http://", "https://"))][:3]
 
     excerpts = []
@@ -37,14 +35,11 @@ async def researcher_node(state, *, services):
         excerpts.append(f"## {url}\n{await _fetch_excerpt(state, services, url)}")
 
     followup = "TOOL RESULTS:\n" + ("\n\n".join(excerpts) if excerpts else "No URLs found.")
-    second = await chat_with_retry(services, state, "researcher",
-                                   base_messages + [{"role": "user", "content": followup}])
+    second = await services.agent.chat(state["agent_id"], prompt + "\n\n" + followup, cid)
     notes = ("### Sources consulted (live, in the headful browser)\n"
              + "\n".join(f"- {u}" for u in urls)
-             + "\n\n" + second.text)
+             + "\n\n" + second)
     updates.update({"research_notes": notes, "status": "coding"})
-    updates = await apply_llm_cost(updates, state, services, first, "researcher")
-    updates = await apply_llm_cost(updates, {**state, **updates}, services, second, "researcher")
     await emit(services, state, "researcher", "node_completed", {"urls": urls})
     return updates
 
