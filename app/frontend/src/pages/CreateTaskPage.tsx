@@ -1,25 +1,76 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import type { TaskCreateResponse } from "../api/types";
+import SearchableSelect from "../components/SearchableSelect";
+import type { Option } from "../components/SearchableSelect";
 
-interface OverrideRow {
-  key: string;
-  value: string;
+interface Repo {
+  full_name: string;
+  private: boolean;
+  default_branch: string;
+}
+
+interface TemplateInfo {
+  id: string;
+  name: string;
+  description: string;
+  tags: string[];
 }
 
 export default function CreateTaskPage() {
   const navigate = useNavigate();
   const [description, setDescription] = useState("");
+  const [repos, setRepos] = useState<Repo[]>([]);
+  const [reposLoading, setReposLoading] = useState(true);
+  const [reposError, setReposError] = useState<string | null>(null);
   const [repo, setRepo] = useState("");
   const [baseBranch, setBaseBranch] = useState("main");
-  const [testCommand, setTestCommand] = useState("");
-  const [overrides, setOverrides] = useState<OverrideRow[]>([]);
+  const [templates, setTemplates] = useState<TemplateInfo[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
+  const [templateId, setTemplateId] = useState("codex");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const setOverride = (i: number, patch: Partial<OverrideRow>) =>
-    setOverrides((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  useEffect(() => {
+    api.githubRepos().then(
+      (rs) => {
+        setRepos(rs);
+        setReposLoading(false);
+      },
+      (e) => {
+        setReposError(e instanceof Error ? e.message : String(e));
+        setReposLoading(false);
+      },
+    );
+    api.templates().then(
+      (ts) => {
+        setTemplates(ts);
+        setTemplatesLoading(false);
+      },
+      (e) => {
+        setTemplatesError(e instanceof Error ? e.message : String(e));
+        setTemplatesLoading(false);
+      },
+    );
+  }, []);
+
+  const repoOptions: Option[] = useMemo(
+    () => repos.map((r) => ({ value: r.full_name, label: r.full_name, hint: r.private ? "private" : undefined })),
+    [repos],
+  );
+
+  const templateOptions: Option[] = useMemo(
+    () => templates.map((t) => ({ value: t.id, label: t.name, hint: t.description })),
+    [templates],
+  );
+
+  const pickRepo = (value: string) => {
+    setRepo(value);
+    const r = repos.find((x) => x.full_name === value);
+    if (r?.default_branch) setBaseBranch(r.default_branch);
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,17 +81,12 @@ export default function CreateTaskPage() {
     }
     setSubmitting(true);
     try {
-      const model_overrides = Object.fromEntries(
-        overrides
-          .filter((r) => r.key.trim())
-          .map((r) => [r.key.trim(), r.value]),
-      );
       const res: TaskCreateResponse = await api.createTask({
         task_description: description.trim(),
         repo: repo.trim(),
         base_branch: baseBranch.trim() || "main",
-        test_command: testCommand.trim() || null,
-        model_overrides,
+        test_command: null,
+        template_id: templateId,
       });
       navigate(`/tasks/${res.task_id}`);
     } catch (err) {
@@ -66,14 +112,27 @@ export default function CreateTaskPage() {
 
       <div className="row">
         <label>
-          Repo <span className="muted">(org/name)</span>
-          <input
-            value={repo}
-            onChange={(e) => setRepo(e.target.value)}
-            placeholder="acme/widgets"
-            pattern="[\w.-]+/[\w.-]+"
-            required
-          />
+          Repository
+          {reposError ? (
+            <>
+              <input
+                value={repo}
+                onChange={(e) => setRepo(e.target.value)}
+                placeholder="acme/widgets"
+                pattern="[\w.-]+/[\w.-]+"
+                required
+              />
+              <span className="muted error-banner">Couldn't load repos: {reposError}</span>
+            </>
+          ) : (
+            <SearchableSelect
+              options={repoOptions}
+              value={repo}
+              onChange={pickRepo}
+              placeholder={reposLoading ? "Loading repositories…" : "Select a repository…"}
+              loading={reposLoading}
+            />
+          )}
         </label>
         <label>
           Base branch
@@ -82,43 +141,18 @@ export default function CreateTaskPage() {
       </div>
 
       <label>
-        Test command <span className="muted">(optional)</span>
-        <input
-          value={testCommand}
-          onChange={(e) => setTestCommand(e.target.value)}
-          placeholder="pytest -x -q"
+        Agent template <span className="muted">(Maritime harness powering every stage)</span>
+        {templatesError && (
+          <span className="muted error-banner">Couldn't load templates: {templatesError}</span>
+        )}
+        <SearchableSelect
+          options={templateOptions}
+          value={templateId}
+          onChange={setTemplateId}
+          placeholder={templatesLoading ? "Loading templates…" : "Select a template…"}
+          loading={templatesLoading}
         />
       </label>
-
-      <fieldset>
-        <legend>
-          Model overrides <span className="muted">(optional per-stage models)</span>
-        </legend>
-        {overrides.map((r, i) => (
-          <div className="row override-row" key={i}>
-            <input
-              value={r.key}
-              onChange={(e) => setOverride(i, { key: e.target.value })}
-              placeholder="planner"
-            />
-            <input
-              value={r.value}
-              onChange={(e) => setOverride(i, { value: e.target.value })}
-              placeholder="openai/gpt-4o"
-            />
-            <button
-              type="button"
-              className="btn ghost"
-              onClick={() => setOverrides((rows) => rows.filter((_, idx) => idx !== i))}
-            >
-              ✕
-            </button>
-          </div>
-        ))}
-        <button type="button" className="btn ghost" onClick={() => setOverrides((r) => [...r, { key: "", value: "" }])}>
-          + Add override
-        </button>
-      </fieldset>
 
       {error && <p className="error-banner">{error}</p>}
 

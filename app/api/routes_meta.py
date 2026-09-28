@@ -31,20 +31,3 @@ async def github_repos(request: Request):
     finally:
         await gh.aclose()
 
-
-@router.get("/models")
-async def models(request: Request):
-    llm = request.app.state.services.llm
-    try:
-        raw = await llm.models()
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"failed to fetch models: {e}") from e
-    return {
-        "models": [
-            {"id": m["id"],
-             "name": m.get("name") or m["id"],
-             "context_length": m.get("context_length"),
-             "pricing": m.get("pricing") or {}}
-            for m in raw
-        ]
-    }

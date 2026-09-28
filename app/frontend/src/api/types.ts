@@ -19,7 +19,7 @@ export interface TaskCreateRequest {
   repo: string;
   base_branch: string;
   test_command?: string | null;
-  model_overrides?: Record<string, string>;
+  template_id: string;
 }
 
 export interface TaskCreateResponse {
@@ -48,7 +48,8 @@ export interface TaskState {
   cost_so_far: number;
   status: TaskStatus;
   error_log: string[];
-  model_overrides: Record<string, string>;
+  template_id?: string;
+  agent_id?: string | null;
   paused_at: string | null;
   resumed_at: string | null;
   pr_url: string | null;

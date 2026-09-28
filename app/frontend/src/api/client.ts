@@ -63,6 +63,16 @@ export const api = {
   artifacts: (id: string) => request<Artifacts>(`/tasks/${id}/artifacts`),
 
   eventsUrl: (id: string) => `/tasks/${id}/events`,
+
+  githubRepos: () =>
+    request<{ repos: { full_name: string; private: boolean; default_branch: string }[] }>(
+      "/github/repos",
+    ).then((r) => r.repos ?? []),
+
+  templates: () =>
+    request<{ templates: { id: string; name: string; description: string; tags: string[] }[] }>(
+      "/templates",
+    ).then((r) => r.templates ?? []),
 };
 
 // SSE event name is the event `type` field, so register a listener per type.
