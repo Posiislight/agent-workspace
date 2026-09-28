@@ -12,6 +12,11 @@ async def tester_node(state, *, services):
     await emit(services, state, "tester", "node_started", {})
     sb = services.sandbox_factory(state)
     await sb.ensure()
+    deps = await sb.sync_deps()
+    if deps.exit_code != 0:
+        await emit(services, state, "tester", "tool_call",
+                   {"command": "sync_deps", "exit_code": deps.exit_code,
+                    "output": deps.combined[-2000:]})
     cmd = state.get("test_command") or services.settings.test_command
     res = await sb.run_long(cmd, timeout=services.settings.sandbox_run_timeout_seconds)
     await emit(services, state, "tester", "tool_call", {"command": cmd, "exit_code": res.exit_code})

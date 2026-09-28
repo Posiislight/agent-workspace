@@ -105,6 +105,21 @@ class MaritimeSandbox:
                 return ExecResult(124, f"run_long timeout after {timeout}s (log: {log})", "")
             await asyncio.sleep(self._s.sandbox_poll_interval_seconds)
 
+    async def sync_deps(self) -> ExecResult:
+        """Install repo deps into the venv before each test run.
+
+        Provisioning only installs what existed at clone time; the harness may
+        add requirements files (or the repo may have none), so re-sync here and
+        guarantee pytest is present for the default test command.
+        """
+        script = (
+            f"for f in requirements.txt requirements-dev.txt; do "
+            f"if [ -f \"$f\" ]; then {VENV}/bin/pip install -q -r \"$f\"; fi; done; "
+            f"{VENV}/bin/python -m pytest --version >/dev/null 2>&1 "
+            f"|| {VENV}/bin/pip install -q pytest"
+        )
+        return await self.run_long(script)
+
     async def read_file(self, path: str) -> str:
         r = await self._client.get(f"/api/agents/{self.agent_id}/files/download",
                                    headers=self._headers(), params={"path": path})

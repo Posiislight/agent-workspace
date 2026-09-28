@@ -152,3 +152,21 @@ async def test_diff_uses_base_branch():
     d = await sb.diff()
     assert d.startswith("diff --git")
     assert any("git diff --cached main" in c for c in m.exec_calls)
+
+
+async def test_sync_deps_installs_requirements_and_pytest():
+    import app.sandbox.maritime as m
+    from app.sandbox.base import ExecResult
+    s = m.MaritimeSandbox.__new__(m.MaritimeSandbox)
+    seen = []
+
+    async def fake_run_long(command, timeout=None):
+        seen.append(command)
+        return ExecResult(0, "", "")
+    s.run_long = fake_run_long
+    res = await s.sync_deps()
+    assert res.exit_code == 0
+    cmd = seen[0]
+    assert "requirements.txt" in cmd
+    assert "-m pytest --version" in cmd and "pip install -q pytest" in cmd
+    assert "'" not in cmd  # run_long wraps the command in single quotes

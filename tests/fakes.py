@@ -47,6 +47,7 @@ class StubSandbox:
         self.shells: list[str] = []
         self.run_calls: list[str] = []
         self.ensured = 0
+        self.deps_synced = 0
         self.slept = False
 
     async def ensure(self) -> str:
@@ -56,6 +57,10 @@ class StubSandbox:
     async def exec(self, command, timeout=None) -> ExecResult:
         self.shells.append(command)
         return ExecResult(0, self.exec_stdout, "")
+
+    async def sync_deps(self) -> ExecResult:
+        self.deps_synced += 1
+        return ExecResult(0, "", "")
 
     async def run_long(self, command: str, timeout=None) -> ExecResult:
         self.run_calls.append(command)

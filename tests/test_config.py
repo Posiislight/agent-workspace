@@ -6,7 +6,7 @@ def test_settings_defaults():
     assert s.sandbox_run_timeout_seconds == 1800
     assert s.sandbox_exec_timeout_seconds == 110
     assert s.model_coding_agent == "anthropic/claude-sonnet-4.5"
-    assert s.test_command == "pytest -q"
+    assert s.test_command == "python -m pytest -q"
 
 
 def test_github_phase2_settings_defaults():

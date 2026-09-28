@@ -37,3 +37,12 @@ async def test_bound_exceeded_routes_to_needs_human():
     assert res.goto == "needs_human"
     assert res.update["status"] == "needs_human"
     assert "retry bound exceeded" in res.update["error_log"][-1]
+
+
+async def test_syncs_deps_before_running_tests():
+    from app.graph.nodes.tester import tester_node
+    sb = StubSandbox(run_results=[ExecResult(0, "1 passed", "")])
+    s = make_services(sandbox=sb)
+    await tester_node(_tester_state(), services=s)
+    assert sb.deps_synced == 1
+    assert sb.run_calls == ["pytest -q"]

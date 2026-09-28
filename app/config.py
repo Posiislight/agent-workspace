@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     sandbox_run_timeout_seconds: int = 1800
     sandbox_exec_timeout_seconds: int = 110
     sandbox_poll_interval_seconds: float = 2.0
-    test_command: str = "pytest -q"
+    test_command: str = "python -m pytest -q"  # -m puts repo root on sys.path
 
     backoff_attempts: int = 3
     backoff_base_delay: float = 1.0
