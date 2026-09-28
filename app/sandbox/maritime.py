@@ -16,13 +16,22 @@ class MaritimeSandbox:
     """One persistent Maritime VM per task. All repo-touching nodes share it."""
 
     def __init__(self, settings, client: httpx.AsyncClient, task_id: str,
-                 repo: str, base_branch: str):
+                 repo: str, base_branch: str, *, name: str | None = None,
+                 external_id: str | None = None, template_id: str | None = None,
+                 env: dict[str, str] | None = None, install_deps: bool = True):
         self._s = settings
         self._client = client
         self.task_id = task_id
         self.repo = repo
         self.base_branch = base_branch
         self.agent_id: str | None = None
+        self.name = name or f"aw-task-{task_id}"
+        self.external_id = external_id
+        self.template_id = template_id or settings.maritime_template_id
+        self.env = dict(env or {})
+        self.install_deps = install_deps
+        self.last_created = False  # True when the last ensure() created + provisioned
+        self.active_task: str | None = None  # set by TaskWorkspace activation
 
     def _headers(self):
         return {"Authorization": f"Bearer {self._s.maritime_api_key}"}
@@ -33,14 +42,39 @@ class MaritimeSandbox:
             if r.status_code == 200:
                 return self.agent_id
             self.agent_id = None  # 404: VM deleted — recreate (spec §7)
+            self.active_task = None
+        self.last_created = False
+        if self.external_id:
+            # Persistent repo agent: get-or-create by our own id so a process
+            # restart finds the sleeping VM instead of creating a new one.
+            found = await self._find_by_external_id()
+            if found:
+                self.agent_id = found
+                # Idempotent: clones only if the workspace is missing.
+                await self._provision()
+                return self.agent_id
+        body = {"name": self.name, "templateId": self.template_id}
+        if self.external_id:
+            body["externalId"] = self.external_id
+        if self.env:
+            body["initialEnvVars"] = [{"key": k, "value": v, "isSecret": True}
+                                      for k, v in self.env.items()]
         r = await with_retry(lambda: self._client.post(
-            "/api/agents", headers=self._headers(),
-            json={"name": f"aw-task-{self.task_id}",
-                  "templateId": self._s.maritime_template_id}))
+            "/api/agents", headers=self._headers(), json=body))
         r.raise_for_status()
         self.agent_id = r.json()["id"]
+        self.last_created = True
         await self._provision()
         return self.agent_id
+
+    async def _find_by_external_id(self) -> str | None:
+        r = await self._client.get("/api/agents", headers=self._headers(),
+                                   params={"externalId": self.external_id})
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        agents = data if isinstance(data, list) else data.get("agents", [])
+        return agents[0]["id"] if agents else None
 
     async def _provision(self):
         repo = shlex.quote(self.repo)
@@ -53,10 +87,15 @@ class MaritimeSandbox:
             # PAT scrub: the clone URL embeds the token in .git/config; reset the
             # remote to the plain HTTPS URL so it cannot be read back by the VM.
             f"git -C {WORKSPACE} remote set-url origin https://github.com/{repo}.git\n"
-            f"if [ ! -d {VENV} ]; then python3 -m venv {VENV}; fi\n"
-            f"if [ -f {WORKSPACE}/requirements.txt ]; then "
-            f"{VENV}/bin/pip install -q -r {WORKSPACE}/requirements.txt; fi\n"
-            f"mkdir -p {RUNS_DIR}\n"
+            f"git -C {WORKSPACE} config user.email aw@agent-workspace.local\n"
+            f"git -C {WORKSPACE} config user.name agent-workspace\n"
+            # Non-Python templates (e.g. Node-based harness images) may lack venv:
+            # tolerate it, the Tester then falls back to the system interpreter.
+            f"if [ ! -d {VENV} ]; then python3 -m venv {VENV} || true; fi\n"
+            + (f"if [ -f {WORKSPACE}/requirements.txt ] && [ -x {VENV}/bin/pip ]; then "
+               f"{VENV}/bin/pip install -q -r {WORKSPACE}/requirements.txt; fi\n"
+               if self.install_deps else "")
+            + f"mkdir -p {RUNS_DIR} /data/.aw\n"
         )
         res = await self.exec(script)
         if res.exit_code != 0:
@@ -124,6 +163,8 @@ class MaritimeSandbox:
         return res.stdout
 
     async def sleep(self) -> None:
+        if not self.agent_id:
+            return
         await self._client.post(f"/api/agents/{self.agent_id}/sleep", headers=self._headers())
 
 

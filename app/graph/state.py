@@ -3,7 +3,7 @@ from typing import Literal, Optional, TypedDict
 
 TaskStatus = Literal[
     "planning", "researching", "coding", "testing", "reviewing",
-    "awaiting_approval", "committing", "done", "failed", "needs_human",
+    "awaiting_approval", "awaiting_budget", "committing", "done", "failed", "needs_human",
 ]
 
 
@@ -45,10 +45,28 @@ class TaskState(TypedDict):
     resumed_at: Optional[str]
     pr_url: Optional[str]
     pr_number: Optional[int]
+    # Phase 4/5
+    harness: str                        # openrouter | dsh | codex
+    workspace_slot: int                 # which (repo, template, slot) agent holds the work
+    workspace_metrics: list             # cold/warm startup measurements
+    candidates: list                    # Best-of-N harness list requested
+    candidate_results: list             # Best-of-N scoreboard rows
+    followup_request: Optional[dict]    # pending {source, instruction, at}
+    followups: list                     # history of follow-up turns
+    ci_fix_attempts: int
+    ci_seen: list                       # "{sha}:{check}" already handled
+    budget_usd: float                   # 0 = unlimited
+    llm_cost: float
+    vm_seconds: float
+    vm_cost: float
+    preview: Optional[dict]             # {command, port, path, setup}
+    visual_proof: Optional[dict]
 
 
 def initial_state(task_id: str, description: str, repo: str, base_branch: str,
-                  test_command: str, model_overrides: dict) -> TaskState:
+                  test_command: str, model_overrides: dict, *, harness: str = "openrouter",
+                  candidates: list | None = None, budget_usd: float = 0.0,
+                  preview: dict | None = None) -> TaskState:
     return TaskState(
         task_id=task_id, task_description=description, repo=repo, base_branch=base_branch,
         test_command=test_command or "", plan=None, research_notes=None, code_diff=None,
@@ -56,4 +74,8 @@ def initial_state(task_id: str, description: str, repo: str, base_branch: str,
         retry_counts={"testing": 0, "coding": 0}, cost_so_far=0.0, sandbox_id=None,
         computer_id=None, status="planning", error_log=[], model_overrides=model_overrides,
         paused_at=None, resumed_at=None, pr_url=None, pr_number=None,
+        harness=harness, workspace_slot=0, workspace_metrics=[],
+        candidates=list(candidates or []), candidate_results=[], followup_request=None,
+        followups=[], ci_fix_attempts=0, ci_seen=[], budget_usd=float(budget_usd or 0.0),
+        llm_cost=0.0, vm_seconds=0.0, vm_cost=0.0, preview=preview, visual_proof=None,
     )

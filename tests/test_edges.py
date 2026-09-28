@@ -43,7 +43,7 @@ def test_tester_bound_exceeded_routes_to_needs_human():
 
 def test_reviewer_approved_routes_to_human():
     st = base_state(approval_status="approved", retry_counts={"coding": 0})
-    assert route_after_reviewer(st) == "human_approval"
+    assert route_after_reviewer(st) == "visual_proof"
 
 
 def test_reviewer_rejected_routes_to_coding():

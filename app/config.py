@@ -31,6 +31,26 @@ class Settings(BaseSettings):
     backoff_attempts: int = 3
     backoff_base_delay: float = 1.0
 
+    # Phase 4/5 — plan limits: awake VMs and running computers (sleeping VMs are free)
+    max_awake_vms: int = 2
+    max_running_computers: int = 1
+
+    # Harness layer: template id + command per CLI harness ({brief} = brief file path)
+    default_harness: str = "openrouter"
+    maritime_template_dsh: str = "dsh"
+    maritime_template_codex: str = "codex"
+    harness_cmd_dsh: str = 'dsh --profile headless "$(cat {brief})"'
+    harness_cmd_codex: str = 'codex exec --full-auto --skip-git-repo-check "$(cat {brief})"'
+    harness_env: dict[str, str] = {}
+
+    # Cost / budget (VM billing is nominal: awake-minutes x rate)
+    vm_cost_per_minute: float = 0.002
+    default_budget_usd: float = 0.0
+
+    # Follow-ups
+    ci_autofix_max_attempts: int = 2
+    proof_artifacts_branch: str = "aw-artifacts"
+
 
 @lru_cache
 def get_settings() -> Settings:

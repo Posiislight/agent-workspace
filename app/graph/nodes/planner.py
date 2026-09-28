@@ -14,6 +14,7 @@ async def planner_node(state, *, services):
     await emit(services, state, "planner", "node_started", {})
     await emit(services, state, "planner", "tool_call", {"action": "read_file_tree"})
     tree = await _file_tree(state, services)
+    memory = await _repo_memory(state, services)
     prior = ""
     if state.get("plan") and state.get("approval_status") == "rejected":
         prior = (f"\n\nPREVIOUS PLAN (revise it, addressing all human feedback; "
@@ -22,13 +23,25 @@ async def planner_node(state, *, services):
         {"role": "system", "content": PLANNER_PROMPT},
         {"role": "user", "content":
             f"Repository: {state['repo']} (base branch {state['base_branch']})\n"
-            f"File tree (depth 2):\n{tree}\n\nTask: {state['task_description']}{prior}"},
+            f"File tree (depth 2):\n{tree}\n\n"
+            + (f"REPO MEMORY (what earlier tasks on this repo did - follow the same "
+               f"conventions):\n{memory}\n\n" if memory else "")
+            + f"Task: {state['task_description']}{prior}"},
     ]
     result = await chat_with_retry(services, state, "planner", messages)
     updates = {"plan": result.text, "status": "researching", "error_log": list(state["error_log"])}
     updates = await apply_llm_cost(updates, state, services, result, "planner")
     await emit(services, state, "planner", "node_completed", {"plan_chars": len(result.text)})
     return updates
+
+
+async def _repo_memory(state, services) -> str:
+    try:
+        sb = services.sandbox_factory(state)
+        read = getattr(sb, "read_memory", None)
+        return (await read()) if read else ""
+    except Exception:  # noqa: BLE001 - memory is a hint, never a blocker
+        return ""
 
 
 async def _file_tree(state, services) -> str:

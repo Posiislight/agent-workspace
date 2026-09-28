@@ -17,7 +17,7 @@ async def test_reviewer_approved_routes_to_human():
     res = await reviewer_node(rstate(), services=s)
     assert res.update["approval_status"] == "approved"
     assert res.update["review_comments"] is None
-    assert res.goto == "human_approval"
+    assert res.goto == "visual_proof"
 
 
 async def test_reviewer_needs_changes_routes_to_coding():

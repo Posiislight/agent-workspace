@@ -155,10 +155,19 @@ async def test_reject_via_webhook_loops_back_to_planner(settings, redis_client):
                               headers=_comment_headers(body))
         assert r.status_code == 202
 
-    st = await wait_for(matching(rm, tid, "HUMAN FEEDBACK: wrong approach"),
-                        msg="never looped back with feedback")
+    # The reject loops Planner -> ... -> Reviewer and pauses at the gate again; the
+    # reviewer re-approves on the way, so approval_status is not a stable signal.
+    # Wait for the second pause and assert the loop itself.
+    async def repaused():
+        st = await rm.get_state(tid)
+        return st if (st and st.get("status") == "awaiting_approval"
+                      and st.get("plan") == "REVISED PLAN") else None
+    st = await wait_for(repaused, msg="never looped back to the gate with a revised plan")
     assert st["task_description"].endswith("HUMAN FEEDBACK: wrong approach")
-    assert st["approval_status"] == "rejected"
+    planner_calls = [c for c in services.llm.calls
+                     if "PREVIOUS PLAN" in c["messages"][-1]["content"]]
+    assert len(planner_calls) == 1
+    assert "HUMAN FEEDBACK: wrong approach" in planner_calls[0]["messages"][-1]["content"]
 
 
 def awaiting(rm, tid):

@@ -1,6 +1,8 @@
+import re
+
 from app.github.pr_flow import ensure_draft_pr
 from app.github.push import branch_for, push_branch
-from app.graph.nodes.helpers import emit
+from app.graph.nodes.helpers import emit, now_iso
 
 
 async def commit_pr_node(state, *, services):
@@ -35,6 +37,23 @@ async def commit_pr_node(state, *, services):
                          for c in comments)
     if not already_posted:
         await github.add_comment(repo, pr["number"], summary)
+    await _remember(services, state)
     await emit(services, state, "commit_pr", "node_completed",
                {"pr_url": pr["html_url"]})
     return {"status": "done", "pr_url": pr["html_url"]}
+
+
+async def _remember(services, state):
+    """Append a line to the repo agent's memory (spec phase-4 §6)."""
+    sb = services.sandbox_factory(state)
+    append = getattr(sb, "append_memory", None)
+    if append is None:
+        return
+    files = sorted(set(re.findall(r"^\+\+\+ b/(\S+)", state.get("code_diff") or "", re.MULTILINE)))
+    try:
+        await append(f"- {now_iso()[:10]} [{state.get('harness') or 'openrouter'}] "
+                     f"{state['task_description'][:160]} | files: {', '.join(files[:8]) or '-'}"
+                     f" | tests: `{state.get('test_command') or services.settings.test_command}`"
+                     f" | PR: {state.get('pr_url') or '-'}")
+    except Exception:  # noqa: BLE001, S110 - memory is best-effort
+        pass

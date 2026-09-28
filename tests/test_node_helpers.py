@@ -21,4 +21,6 @@ async def test_apply_llm_cost_updates_state_and_emits():
     events = s.publisher.events
     assert len(events) == 1
     assert events[0].type == "cost_update"
-    assert events[0].data == {"cost_so_far": 0.001}
+    assert events[0].data["cost_so_far"] == 0.001
+    assert events[0].data["llm_cost"] == 0.001
+    assert events[0].data["vm_cost"] == 0.0

@@ -16,7 +16,36 @@ research notes with citations."""
 
 async def researcher_node(state, *, services):
     await emit(services, state, "researcher", "node_started", {})
-    comp = await services.computers.ensure(state["task_id"])
+    pool = getattr(services, "pool", None)
+    if pool is not None:
+        # Lock ordering: VM lease before computer lease (visual_proof does the same),
+        # so a task holding the computer never waits on a VM slot held by a task
+        # that is itself waiting for the computer.
+        try:
+            await services.sandbox_factory(state).ensure()
+        except Exception:  # noqa: BLE001, S110 - excerpts fall back to fetch errors
+            pass
+
+        async def _queued():
+            await emit(services, state, "researcher", "tool_call",
+                       {"action": "queued_for_computer"})
+        await pool.acquire_computer(state["task_id"], on_wait=_queued)
+    comp = None
+    try:
+        comp = await services.computers.ensure(state["task_id"])
+        return await _research(state, services, comp)
+    finally:
+        # One running computer on the plan: sleep it and hand the lease back.
+        if pool is not None:
+            if comp is not None:
+                try:
+                    await services.computers.sleep(comp.computer_id)
+                except Exception:  # noqa: BLE001, S110 - best-effort
+                    pass
+            await pool.release_computer(state["task_id"])
+
+
+async def _research(state, services, comp):
     updates = {"computer_id": comp.computer_id, "status": "researching"}
     viewer = await services.computers.viewer_link(comp.computer_id, mode="watch")
     await emit(services, state, "researcher", "tool_call", {"viewer_url": viewer})

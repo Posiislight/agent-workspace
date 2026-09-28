@@ -21,6 +21,13 @@ class TaskNotFound(RuntimeError):
     pass
 
 
+class FollowupNotAllowed(RuntimeError):
+    pass
+
+
+FOLLOWUP_STATUSES = ("awaiting_approval", "done", "needs_human")
+
+
 class RunManager:
     def __init__(self, services, graph):
         self.services = services
@@ -87,8 +94,11 @@ class RunManager:
                     # resume time — so pull them from the interrupt payload here,
                     # otherwise the mirror has no pr_number and the webhook
                     # route cannot resolve PR -> task.
+                    kind = "approval"
                     for intr in chunk["__interrupt__"]:
-                        pr = (getattr(intr, "value", None) or {}).get("pr")
+                        value = getattr(intr, "value", None) or {}
+                        kind = value.get("kind", kind)
+                        pr = value.get("pr")
                         if pr:
                             values["pr_url"] = pr["html_url"]
                             values["pr_number"] = pr["number"]
@@ -97,7 +107,8 @@ class RunManager:
                     # make Command(resume=...) a no-op. paused_at/status live in the
                     # Redis/PG mirror and are stamped into graph state at resume time.
                     values["paused_at"] = now_iso()
-                    values["status"] = "awaiting_approval"
+                    values["status"] = ("awaiting_budget" if kind == "budget"
+                                        else "awaiting_approval")
                     # A paused drive can never take another step, so vacate the
                     # tracking slot AND release the driving lock BEFORE the
                     # mirror becomes observable: any resume that sees
@@ -113,17 +124,32 @@ class RunManager:
                             pass
                     await self._mirror(task_id, values)
                     await self._emit(task_id, "human_approval", "node_started",
-                                     {"paused_at": values["paused_at"], "paused": True})
-                    try:
-                        await self.services.sandbox_factory(values).sleep()
-                    except Exception:  # noqa: BLE001, S110 - sleeping is best-effort
-                        pass
+                                     {"paused_at": values["paused_at"], "paused": True,
+                                      "kind": kind})
+                    await self._sleep_workspace(values)
                     paused = True
                 else:
                     await self._mirror(task_id, values)
         finally:
+            if not paused:
+                # Done / needs_human / crashed: the VM goes back to sleep and its
+                # lease returns to the pool (phase-4 §4).
+                try:
+                    snap = await self.graph.aget_state({"configurable": {"thread_id": task_id}})
+                    await self._sleep_workspace(dict(snap.values) if snap and snap.values
+                                                else {})
+                except Exception:  # noqa: BLE001, S110 - best-effort
+                    pass
             if self.services.redis is not None and not paused:
                 await self.services.redis.delete(lock_key)
+
+    async def _sleep_workspace(self, values):
+        if not values.get("repo"):
+            return
+        try:
+            await self.services.sandbox_factory(values).sleep()
+        except Exception:  # noqa: BLE001, S110 - sleeping is best-effort
+            pass
 
     async def resume(self, task_id, decision, feedback=None):
         live = self._drives.get(task_id)
@@ -135,9 +161,68 @@ class RunManager:
         self._resume_spawns.add(task_id)
         state = await self.get_state(task_id)
         if not state:
+            self._resume_spawns.discard(task_id)
             raise TaskNotFound(task_id)
-        if state.get("status") != "awaiting_approval":
+        allowed = (("awaiting_approval", "awaiting_budget") if decision == "rejected"
+                   else ("awaiting_approval",))
+        if state.get("status") not in allowed:
+            self._resume_spawns.discard(task_id)
             raise NotAwaitingApproval(task_id)
+        return await self._resume_with(task_id, state, {"decision": decision,
+                                                        "feedback": feedback or ""})
+
+    async def raise_budget(self, task_id, budget_usd: float):
+        live = self._drives.get(task_id)
+        if live is not None and not live.done() and task_id in self._resume_spawns:
+            raise AlreadyRunning(task_id)
+        self._resume_spawns.add(task_id)
+        state = await self.get_state(task_id)
+        if not state:
+            self._resume_spawns.discard(task_id)
+            raise TaskNotFound(task_id)
+        if state.get("status") != "awaiting_budget":
+            self._resume_spawns.discard(task_id)
+            raise NotAwaitingApproval(task_id)
+        return await self._resume_with(task_id, state, {"decision": "raise_budget",
+                                                        "budget_usd": float(budget_usd)})
+
+    async def followup(self, task_id, instruction: str, source: str = "chat",
+                       extra: dict | None = None):
+        """Wake the task's agent with a new instruction on the same branch (phase-4 §7)."""
+        live = self._drives.get(task_id)
+        if live is not None and not live.done():
+            raise AlreadyRunning(task_id)
+        if task_id in self._resume_spawns:
+            raise AlreadyRunning(task_id)
+        self._resume_spawns.add(task_id)
+        state = await self.get_state(task_id)
+        if not state:
+            self._resume_spawns.discard(task_id)
+            raise TaskNotFound(task_id)
+        status = state.get("status")
+        if status not in FOLLOWUP_STATUSES:
+            self._resume_spawns.discard(task_id)
+            raise FollowupNotAllowed(f"task is {status}")
+        if status == "done" and self.services.settings.merge_pr_when_ready:
+            self._resume_spawns.discard(task_id)
+            raise FollowupNotAllowed("PR was merged (MERGE_PR_WHEN_READY=true)")
+        request = {"source": source, "instruction": instruction, "at": now_iso()}
+        history = list(state.get("followups") or []) + [request]
+        update = {"followups": history, **(extra or {})}
+        await self._emit(task_id, "followup", "followup",
+                         {"source": source, "instruction": instruction[:500], "from": status})
+        if status == "awaiting_approval":
+            return await self._resume_with(
+                task_id, state, {"decision": "followup", "feedback": instruction,
+                                 "request": request}, extra_update=update)
+        # Finished thread: new input starts at START, which routes to coding_agent.
+        graph_input = {**update, "followup_request": request, "status": "coding",
+                       "approval_status": "pending",
+                       "retry_counts": {"testing": 0, "coding": 0}}
+        await self._mirror(task_id, {**state, **graph_input})
+        return self._spawn(task_id, self.drive(task_id, graph_input))
+
+    async def _resume_with(self, task_id, state, payload, extra_update=None):
         resumed = now_iso()
         paused = state.get("paused_at")
         latency = None
@@ -146,12 +231,13 @@ class RunManager:
                              - datetime.fromisoformat(paused)).total_seconds(), 3)
         await self._emit(task_id, "human_approval", "sleep_wake",
                          {"paused_at": paused, "resumed_at": resumed,
-                          "resume_latency_seconds": latency, "decision": decision})
-        payload = {"decision": decision, "feedback": feedback or ""}
+                          "resume_latency_seconds": latency,
+                          "decision": payload.get("decision")})
         return self._spawn(
             task_id, self.drive(task_id, Command(resume=payload,
                                                  update={"paused_at": paused,
-                                                         "resumed_at": resumed})))
+                                                         "resumed_at": resumed,
+                                                         **(extra_update or {})})))
 
     async def get_state(self, task_id):
         if self.services.redis is not None:

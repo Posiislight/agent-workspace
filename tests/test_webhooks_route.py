@@ -132,3 +132,68 @@ async def test_ignored_events_return_200(client, app):
     resp = await _post(client, "push", {"action": "x"})
     assert resp.status_code == 200
     assert app.state.run_manager.calls == []
+
+
+class FollowupRunManager(FakeRunManager):
+    def __init__(self, state=None):
+        super().__init__()
+        self.state = state or {}
+        self.followups = []
+
+    async def get_state(self, task_id):
+        return self.state.get(task_id)
+
+    async def followup(self, task_id, instruction, source="chat", extra=None):
+        self.followups.append((task_id, instruction, source, extra))
+
+
+def _check_run(conclusion="failure", sha="abc1234def", branch="aw/t9"):
+    return {"action": "completed", "repository": {"full_name": "org/repo"},
+            "check_run": {"id": 555, "name": "pytest", "conclusion": conclusion,
+                          "head_sha": sha, "app": {"slug": "github-actions"},
+                          "check_suite": {"head_branch": branch}}}
+
+
+async def test_aw_comment_triggers_followup(monkeypatch):
+    rm = FollowupRunManager()
+    app = make_app(rm)
+
+    async def fake_lookup(dsn, repo, pr):
+        return {"task_id": "t1"}
+    monkeypatch.setattr(rw, "get_task_by_pr", fake_lookup)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://t") as c:
+        r = await _post(c, "issue_comment", {
+            "action": "created", "repository": {"full_name": "org/repo"},
+            "issue": {"number": 3, "pull_request": {}},
+            "comment": {"body": "/aw add a docstring", "user": {"type": "User"}}})
+    assert r.status_code == 202 and r.json()["followup"] is True
+    assert rm.followups == [("t1", "add a docstring", "pr_comment", None)]
+    assert rm.calls == []                       # not an approve/reject decision
+
+
+async def test_ci_failure_wakes_agent_with_log_then_dedupes_and_caps():
+    rm = FollowupRunManager({"t9": {"status": "done", "ci_seen": [], "ci_fix_attempts": 0}})
+    app = make_app(rm)
+    from tests.fakes import StubGitHub
+    app.state.services.github = StubGitHub()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://t") as c:
+        r = await _post(c, "check_run", _check_run())
+        assert r.json()["followup"] is True
+        task_id, instruction, source, extra = rm.followups[0]
+        assert (task_id, source) == ("t9", "ci")
+        assert "CI check 'pytest' failed on abc1234" in instruction
+        assert "log for job 555" in instruction
+        assert extra == {"ci_seen": ["abc1234def:pytest"], "ci_fix_attempts": 1}
+
+        rm.state["t9"].update(extra)
+        dup = await _post(c, "check_run", _check_run())
+        assert dup.json() == {"ok": True, "followup": False, "reason": "already handled"}
+
+        rm.state["t9"]["ci_fix_attempts"] = 2
+        capped = await _post(c, "check_run", _check_run(sha="fff0000"))
+        assert capped.json()["reason"] == "ci autofix attempt cap reached"
+        green = await _post(c, "check_run", _check_run(conclusion="success", sha="eee"))
+        assert green.json()["resumed"] is False
+    assert len(rm.followups) == 1

@@ -51,3 +51,49 @@ def classify_event(event: str, payload: dict) -> dict | None:
         return {"pr_number": issue.get("number"),
                 "decision": parsed[0], "feedback": parsed[1]}
     return None
+
+FOLLOWUP_PREFIX = "/aw "
+CI_FAILED = ("failure", "timed_out")
+
+
+def classify_followup(event: str, payload: dict) -> dict | None:
+    """Follow-up triggers (phase-4 §7): `/aw ...` PR comments and failed CI checks."""
+    if event in ("issue_comment", "pull_request_review_comment"):
+        if payload.get("action") != "created":
+            return None
+        comment = payload.get("comment") or {}
+        if (comment.get("user") or {}).get("type") == "Bot":
+            return None
+        body = (comment.get("body") or "").strip()
+        if not body.lower().startswith(FOLLOWUP_PREFIX):
+            return None
+        instruction = body[len(FOLLOWUP_PREFIX):].strip()
+        if not instruction:
+            return None
+        if event == "issue_comment":
+            issue = payload.get("issue") or {}
+            if "pull_request" not in issue:
+                return None
+            pr_number = issue.get("number")
+        else:
+            pr_number = (payload.get("pull_request") or {}).get("number")
+            where = comment.get("path")
+            if where:
+                line = comment.get("line") or comment.get("original_line")
+                instruction += f"\n(Review comment on {where}{f':{line}' if line else ''})"
+        return {"kind": "comment", "pr_number": pr_number, "instruction": instruction,
+                "source": "pr_comment"}
+    if event == "check_run":
+        run = payload.get("check_run") or {}
+        if payload.get("action") != "completed" or run.get("conclusion") not in CI_FAILED:
+            return None
+        suite = run.get("check_suite") or {}
+        branch = suite.get("head_branch") or ""
+        if not branch.startswith("aw/"):
+            return None
+        return {"kind": "ci", "task_id": branch[len("aw/"):], "sha": run.get("head_sha") or "",
+                "name": run.get("name") or "check", "job_id": run.get("id"),
+                "app": (run.get("app") or {}).get("slug"),
+                "summary": ((run.get("output") or {}).get("summary") or "")[:2000],
+                "details_url": run.get("details_url"), "source": "ci"}
+    return None

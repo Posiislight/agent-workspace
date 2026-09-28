@@ -18,6 +18,7 @@ async def human_approval_node(state, *, services):
     await emit(services, state, "human_approval", "tool_call",
                {"pr_url": pr["html_url"], "pr_number": pr["number"]})
     payload = interrupt({
+        "kind": "approval",
         "task_id": state["task_id"],
         "pr": pr,
         "summary": {"plan_chars": len(state.get("plan") or ""),
@@ -32,6 +33,13 @@ async def human_approval_node(state, *, services):
     decision = payload.get("decision")
     feedback = payload.get("feedback") or ""
     pr_update = {"pr_url": pr["html_url"], "pr_number": pr["number"]}
+    if decision == "followup":
+        # Chat / CI / PR-comment follow-up while the PR waits: same branch, same VM.
+        request = payload.get("request") or {"source": "chat", "instruction": feedback}
+        return Command(update={"followup_request": request, "approval_status": "pending",
+                               "retry_counts": {"testing": 0, "coding": 0},
+                               "status": "coding", **pr_update},
+                       goto="coding_agent")
     if decision == "approved":
         return Command(update={"approval_status": "approved",
                                "status": "committing", **pr_update},

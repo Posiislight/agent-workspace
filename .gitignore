@@ -10,3 +10,4 @@ uvicorn.log
 
 node_modules/
 *.tsbuildinfo
+dump.rdb

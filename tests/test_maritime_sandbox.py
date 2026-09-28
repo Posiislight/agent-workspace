@@ -26,6 +26,10 @@ class MaritimeMock:
             self.next_id += 1
             self.agents[aid] = body
             return httpx.Response(201, json={"id": aid, "name": body["name"]})
+        if method == "GET" and path == "/api/agents":
+            ext = request.url.params.get("externalId")
+            return httpx.Response(200, json=[{"id": aid} for aid, b in self.agents.items()
+                                             if b.get("externalId") == ext])
         if method == "GET" and path.endswith("/download"):
             aid = path.split("/")[-2]
             p = request.url.params.get("path", "")
@@ -123,3 +127,27 @@ async def test_diff_uses_base_branch():
     d = await sb.diff()
     assert d.startswith("diff --git")
     assert any("git diff --cached main" in c for c in m.exec_calls)
+
+
+async def test_repo_agent_get_or_create_by_external_id():
+    m = MaritimeMock()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(m.handler),
+                               base_url="https://api.maritime.sh")
+    s = Settings(maritime_api_key="mk_test", maritime_template_id="t-code",
+                 sandbox_poll_interval_seconds=0.0)
+    a1 = MaritimeSandbox(s, client, "x", "org/repo", "main", name="aw-repo-org-repo",
+                         external_id="aw-repo:org/repo:dsh:0", template_id="dsh",
+                         env={"K": "v"}, install_deps=False)
+    await a1.ensure()
+    assert a1.last_created is True
+    created = m.agents[a1.agent_id]
+    assert created["templateId"] == "dsh"
+    assert created["externalId"] == "aw-repo:org/repo:dsh:0"
+    assert created["initialEnvVars"] == [{"key": "K", "value": "v", "isSecret": True}]
+    assert not any("pip install" in c for c in m.exec_calls)
+    # A fresh process finds the sleeping VM instead of creating another one.
+    a2 = MaritimeSandbox(s, client, "x", "org/repo", "main", name="aw-repo-org-repo",
+                         external_id="aw-repo:org/repo:dsh:0", template_id="dsh")
+    await a2.ensure()
+    assert a2.agent_id == a1.agent_id and a2.last_created is False
+    assert len(m.agents) == 1

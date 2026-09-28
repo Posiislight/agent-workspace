@@ -10,9 +10,18 @@ def route_after_tester(state) -> str:
     return "coding_agent"
 
 
+def route_start(state) -> str:
+    """A follow-up on a finished thread skips planning and goes straight to code."""
+    return "coding_agent" if state.get("followup_request") else "planner"
+
+
+def route_after_researcher(state) -> str:
+    return "best_of_n" if len(state.get("candidates") or []) > 1 else "coding_agent"
+
+
 def route_after_reviewer(state) -> str:
     if state["approval_status"] == "approved":
-        return "human_approval"
+        return "visual_proof"
     if state["retry_counts"].get("coding", 0) >= MAX_CODING_RETRIES:
         return "needs_human"
     return "coding_agent"

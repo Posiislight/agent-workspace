@@ -1,9 +1,18 @@
 import json
 import re
+from dataclasses import dataclass, field
 
 from langgraph.types import Command
 
-from app.graph.nodes.helpers import apply_llm_cost, chat_with_retry, emit
+from app.graph.nodes.helpers import (
+    apply_llm_cost,
+    apply_vm_cost,
+    budget_stop,
+    chat_with_retry,
+    check_budget,
+    emit,
+)
+from app.harness import CLI_HARNESSES, run_cli_harness
 
 CODING_AGENT_PROMPT = """You are the Coding Agent. You implement the given plan, using the research
 notes provided, inside an isolated sandbox with full read/write access to the
@@ -24,70 +33,132 @@ MAX_ROUNDS = 8
 
 
 async def coding_agent_node(state, *, services):
-    await emit(services, state, "coding_agent", "node_started", {})
+    harness = state.get("harness") or services.settings.default_harness
+    await emit(services, state, "coding_agent", "node_started", {"harness": harness})
+    budget, stop = await check_budget(state, services, "coding_agent")
+    if stop:
+        return budget_stop(state, "coding_agent")
+    state = {**state, **budget}
     sb = services.sandbox_factory(state)
     await sb.ensure()
 
     updates = {"status": "coding", "error_log": list(state["error_log"]),
-               "retry_counts": dict(state["retry_counts"])}
-    context = ""
-    if state.get("review_comments"):
-        context = "REVIEW COMMENTS TO ADDRESS:\n" + "\n".join(state["review_comments"])
-        updates["review_comments"] = None  # consumed
-        updates["retry_counts"] = {**state["retry_counts"],
-                                   "coding": state["retry_counts"].get("coding", 0) + 1}
-    elif state.get("test_results") and not state["test_results"]["passed"]:
-        context = ("TEST FAILURE DETAILS:\n"
-                   + (state["test_results"].get("failing_output") or ""))
-        updates["retry_counts"] = {**state["retry_counts"],
-                                   "testing": state["retry_counts"].get("testing", 0) + 1}
+               "retry_counts": dict(state["retry_counts"]), **budget}
+    context, consumed = build_context(state)
+    updates.update(consumed)
 
+    if harness in CLI_HARNESSES:
+        return await _cli_round(state, services, sb, harness, context, updates)
+
+    outcome = await openrouter_loop(state, services, sb, context)
+    for result in outcome.results:
+        updates = await apply_llm_cost(updates, {**state, **updates}, services,
+                                       result, "coding_agent")
+    if not outcome.ok:
+        updates["error_log"] = updates["error_log"] + [f"coding_agent: {outcome.error}"]
+        return Command(update={**updates, "status": "needs_human"}, goto="needs_human")
+    diff = await sb.diff()
+    if not diff.strip():
+        updates["error_log"] = updates["error_log"] + ["coding_agent: empty diff"]
+        return Command(update={**updates, "status": "needs_human"}, goto="needs_human")
+    updates["code_diff"] = diff
+    updates["status"] = "testing"
+    await emit(services, state, "coding_agent", "node_completed", {"diff_chars": len(diff)})
+    return Command(update=updates, goto="tester")
+
+
+@dataclass
+class LoopOutcome:
+    ok: bool
+    error: str = ""
+    results: list = field(default_factory=list)  # every LLMResult, for cost
+
+
+async def openrouter_loop(state, services, sb, context: str,
+                          node: str = "coding_agent") -> LoopOutcome:
+    """The in-process JSON-ops harness: rounds of LLM ops applied to the workspace."""
     messages = [{"role": "system", "content": CODING_AGENT_PROMPT},
                 {"role": "user", "content": _brief(state, context)}]
-
+    results = []
     bad_rounds = 0
     for _round in range(MAX_ROUNDS):
         result = await chat_with_retry(services, state, "coding_agent", messages)
+        results.append(result)
         try:
             ops, done = _parse_round(result.text)
         except (ValueError, json.JSONDecodeError) as e:
             bad_rounds += 1
             if bad_rounds >= 2:
-                updates["error_log"] = updates["error_log"] + [f"coding_agent: unparseable rounds ({e})"]
-                return Command(update={**updates, "status": "needs_human"}, goto="needs_human")
+                return LoopOutcome(False, f"unparseable rounds ({e})", results)
             messages += [{"role": "assistant", "content": result.text},
                          {"role": "user", "content":
                           f"Invalid response ({e}). Reply with ONLY the JSON object."}]
             continue
         try:
             for op in ops:
-                await _apply_op(services, state, sb, op)
+                await _apply_op(services, state, sb, op, node=node)
         except (ValueError, KeyError, AttributeError, TypeError) as e:
             bad_rounds += 1
             if bad_rounds >= 2:
-                updates["error_log"] = updates["error_log"] + [f"coding_agent: malformed ops ({e})"]
-                return Command(update={**updates, "status": "needs_human"}, goto="needs_human")
+                return LoopOutcome(False, f"malformed ops ({e})", results)
             messages += [{"role": "assistant", "content": result.text},
                          {"role": "user", "content":
                           f"Ops failed to apply ({e}). Reply with ONLY the JSON object with valid ops."}]
             continue
         bad_rounds = 0
         if done:
-            diff = await sb.diff()
-            if not diff.strip():
-                updates["error_log"] = updates["error_log"] + ["coding_agent: empty diff"]
-                return Command(update={**updates, "status": "needs_human"}, goto="needs_human")
-            updates["code_diff"] = diff
-            updates["status"] = "testing"
-            updates = await apply_llm_cost(updates, {**state, **updates}, services,
-                                           result, "coding_agent")
-            await emit(services, state, "coding_agent", "node_completed", {"diff_chars": len(diff)})
-            return Command(update=updates, goto="tester")
+            return LoopOutcome(True, "", results)
         messages += [{"role": "assistant", "content": result.text},
                      {"role": "user", "content": "Round executed. Continue."}]
+    return LoopOutcome(False, f"no convergence in {MAX_ROUNDS} rounds", results)
 
-    updates["error_log"] = updates["error_log"] + [f"coding_agent: no convergence in {MAX_ROUNDS} rounds"]
-    return Command(update={**updates, "status": "needs_human"}, goto="needs_human")
+
+def build_context(state) -> tuple[str, dict]:
+    """Returns (context for the brief, state updates consuming it)."""
+    updates: dict = {}
+    followup = state.get("followup_request")
+    if followup:
+        updates["followup_request"] = None  # consumed
+        updates["review_comments"] = None
+        return (f"FOLLOW-UP REQUEST (from {followup.get('source', 'chat')}). The branch "
+                "already contains the earlier work for this task; apply this change on "
+                "top of it and keep everything else intact:\n"
+                + (followup.get("instruction") or "")), updates
+    if state.get("review_comments"):
+        updates["review_comments"] = None  # consumed
+        updates["retry_counts"] = {**state["retry_counts"],
+                                   "coding": state["retry_counts"].get("coding", 0) + 1}
+        return "REVIEW COMMENTS TO ADDRESS:\n" + "\n".join(state["review_comments"]), updates
+    if state.get("test_results") and not state["test_results"]["passed"]:
+        updates["retry_counts"] = {**state["retry_counts"],
+                                   "testing": state["retry_counts"].get("testing", 0) + 1}
+        return ("TEST FAILURE DETAILS:\n"
+                + (state["test_results"].get("failing_output") or "")), updates
+    return "", updates
+
+
+async def _cli_round(state, services, sb, harness, context, updates):
+    await emit(services, state, "coding_agent", "tool_call",
+               {"op": "harness_run", "harness": harness})
+    res, _cmd = await run_cli_harness(services.settings, sb, harness, _brief(state, context),
+                                     timeout=services.settings.sandbox_run_timeout_seconds)
+    await emit(services, state, "coding_agent", "tool_call",
+               {"op": "harness_done", "harness": harness, "exit_code": res.exit_code,
+                "log_tail": res.combined[-1500:]})
+    updates = await apply_vm_cost(updates, state, services, "coding_agent", sandbox=sb)
+    if res.exit_code != 0:
+        updates["error_log"] = updates["error_log"] + [
+            f"coding_agent[{harness}]: harness exited {res.exit_code}: {res.combined[-800:]}"]
+        return Command(update={**updates, "status": "needs_human"}, goto="needs_human")
+    diff = await sb.diff()
+    if not diff.strip():
+        updates["error_log"] = updates["error_log"] + [f"coding_agent[{harness}]: empty diff"]
+        return Command(update={**updates, "status": "needs_human"}, goto="needs_human")
+    updates["code_diff"] = diff
+    updates["status"] = "testing"
+    await emit(services, state, "coding_agent", "node_completed",
+               {"diff_chars": len(diff), "harness": harness})
+    return Command(update=updates, goto="tester")
 
 
 def _parse_round(text: str):
@@ -100,16 +171,16 @@ def _parse_round(text: str):
     return d["ops"], bool(d.get("done"))
 
 
-async def _apply_op(services, state, sb, op):
+async def _apply_op(services, state, sb, op, node: str = "coding_agent"):
     kind = op.get("op")
     if kind == "write_file":
         path = "/data/workspace/" + str(op["path"]).lstrip("/")
         await sb.write_file(path, str(op["content"]))
-        await emit(services, state, "coding_agent", "tool_call",
+        await emit(services, state, node, "tool_call",
                    {"op": "write_file", "path": op["path"], "chars": len(str(op["content"]))})
     elif kind == "shell":
         res = await sb.exec(str(op["command"]))
-        await emit(services, state, "coding_agent", "tool_call",
+        await emit(services, state, node, "tool_call",
                    {"op": "shell", "command": op["command"], "exit_code": res.exit_code})
     else:
         raise ValueError(f"unknown op {kind!r}")

@@ -96,7 +96,15 @@ class StubComputers:
                                width=1200, height=750, raw={})
 
     async def shell(self, computer_id, command, timeout_s=30) -> ExecResult:
-        return ExecResult(0, "", "")
+        self.shells = getattr(self, "shells", [])
+        self.shells.append(command)
+        if "curl -s -o /dev/null" in command:
+            return ExecResult(0, "UP", "")
+        return ExecResult(0, "PREPARED", "")
+
+    async def screenshot(self, computer_id):
+        self.shots = getattr(self, "shots", 0) + 1
+        return b"\x89PNG-fake-" + str(self.shots).encode(), "7"
 
     async def open_url(self, computer_id, url):
         self.opened.append(url)
@@ -108,7 +116,7 @@ class StubComputers:
         return self.viewer_url
 
     async def sleep(self, computer_id) -> None:
-        pass
+        self.slept = getattr(self, "slept", 0) + 1
 
 
 class FakeRedis:
@@ -132,7 +140,8 @@ class FakeRedis:
 
 def make_services(llm=None, sandbox=None, publisher=None, prices=None,
                   computers=None, settings=None, redis=None, pg_dsn=None,
-                  github=None) -> SimpleNamespace:
+                  github=None, sandbox_factory=None, pool=None,
+                  workspaces=None) -> SimpleNamespace:
     """Build a Services namespace wired to fakes. sandbox_factory returns the shared stub."""
     from app.graph.nodes.helpers import Services
 
@@ -143,11 +152,13 @@ def make_services(llm=None, sandbox=None, publisher=None, prices=None,
         llm=llm or StubLLM([]),
         prices=prices or StubPriceTable(),
         publisher=publisher or FakePublisher(),
-        sandbox_factory=lambda state: sandbox,
+        sandbox_factory=sandbox_factory or (lambda state: sandbox),
         computers=computers or StubComputers(),
         redis=redis,
         pg_dsn=pg_dsn,
         github=github,
+        pool=pool,
+        workspaces=workspaces,
     )
 
 
@@ -192,5 +203,91 @@ class StubGitHub:
         self.merged.append(number)
         return {}
 
+    async def update_pr(self, repo, number, **fields):
+        self.updated = getattr(self, "updated", [])
+        self.updated.append((number, fields))
+        return {}
+
+    async def put_file(self, repo, path, content_b64, *, branch, message):
+        self.files = getattr(self, "files", {})
+        self.files[(branch, path)] = content_b64
+        return {}
+
+    async def job_log_tail(self, repo, job_id, limit=8000):
+        return f"log for job {job_id}: AssertionError in test_add"
+
     async def aclose(self):
         pass
+
+class FakeAgent:
+    """MaritimeSandbox stand-in for TaskWorkspace tests: records scripts, tracks
+    how many agents are awake at once across a shared counter."""
+
+    def __init__(self, repo="org/repo", base_branch="main", awake_counter=None,
+                 run_result=None, diff_text="diff --git a/f b/f\n+x\n", work_delay=0.0):
+        self.repo = repo
+        self.base_branch = base_branch
+        self.agent_id = None
+        self.last_created = False
+        self.active_task = None
+        self.execs: list[str] = []
+        self.run_calls: list[str] = []
+        self.slept = 0
+        self.awake = False
+        self.counter = awake_counter if awake_counter is not None else {"now": 0, "max": 0}
+        self.run_result = run_result or ExecResult(0, "1 passed", "")
+        self.diff_text = diff_text
+        self.work_delay = work_delay
+        self.files: dict[str, str] = {}
+
+    def _wake(self):
+        if not self.awake:
+            self.awake = True
+            self.counter["now"] += 1
+            self.counter["max"] = max(self.counter["max"], self.counter["now"])
+
+    async def ensure(self):
+        self._wake()
+        self.last_created = self.agent_id is None
+        self.agent_id = self.agent_id or f"agent-{id(self)}"
+        return self.agent_id
+
+    async def exec(self, command, timeout=None):
+        import asyncio
+        self._wake()
+        self.execs.append(command)
+        if "git diff --cached --shortstat" in command:
+            return ExecResult(0, " 1 file changed, 3 insertions(+), 1 deletion(-)", "")
+        if "git diff --cached" in command:
+            return ExecResult(0, self.diff_text, "")
+        if "git checkout" in command:
+            return ExecResult(0, "SWITCHED\n", "")
+        if "memory.md" in command and "tail" in command:
+            return ExecResult(0, "- earlier task | files: calc.py", "")
+        await asyncio.sleep(0)
+        return ExecResult(0, "ok", "")
+
+    async def run_long(self, command, timeout=None):
+        import asyncio
+        self._wake()
+        self.run_calls.append(command)
+        if "sha256sum" in command:
+            return ExecResult(0, "DEPS=installed" if self.slept == 0 else "DEPS=cached", "")
+        if self.work_delay:
+            await asyncio.sleep(self.work_delay)
+        return self.run_result
+
+    async def write_file(self, path, content):
+        self.files[path] = content
+
+    async def read_file(self, path):
+        return self.files.get(path, "")
+
+    async def list_files(self, path):
+        return []
+
+    async def sleep(self):
+        if self.awake:
+            self.awake = False
+            self.counter["now"] -= 1
+        self.slept += 1
