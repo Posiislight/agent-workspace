@@ -28,7 +28,14 @@ async def tester_node(state, *, services):
         exit_code = res.exit_code
         await emit(services, state, "tester", "tool_call", {"command": cmd, "exit_code": exit_code})
         failing = sorted(set(re.findall(r"^FAILED\s+(\S+)", res.combined, re.M)))
-        tr = TestResult(passed=exit_code == 0, failing_output=res.combined[-8000:],
+        output = res.combined[-8000:]
+        # pytest exit 5 = no tests collected. Repos without a suite would
+        # otherwise loop coding<->tester forever; pass and let the reviewer
+        # see the note.
+        no_tests = exit_code == 5
+        if no_tests:
+            output = "no tests collected (pytest exit 5); change is unverified by tests\n" + output
+        tr = TestResult(passed=exit_code == 0 or no_tests, failing_output=output,
                         failing_tests=failing).to_dict()
     await emit(services, state, "tester", "node_completed", {"passed": tr["passed"]})
     route = route_after_tester({**state, "test_results": tr})

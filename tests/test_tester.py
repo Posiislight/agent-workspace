@@ -60,3 +60,14 @@ async def test_dependency_failure_is_reported_instead_of_running_tests():
     assert "foo==9.9" in tr["failing_output"]
     assert sb.run_calls == []
     assert res.goto == "coding_agent"
+
+
+async def test_no_tests_collected_counts_as_pass_with_note():
+    from app.graph.nodes.tester import tester_node
+    sb = StubSandbox(run_results=[ExecResult(5, "no tests ran in 0.00s", "")])
+    s = make_services(sandbox=sb)
+    res = await tester_node(_tester_state(), services=s)
+    tr = res.update["test_results"]
+    assert tr["passed"] is True
+    assert "no tests" in tr["failing_output"]
+    assert res.goto == "reviewer"
