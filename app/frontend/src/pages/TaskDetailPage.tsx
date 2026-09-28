@@ -35,6 +35,16 @@ export default function TaskDetailPage() {
     refetch();
 
     const seen = new Set<string>();
+    // The stream replays every past event on connect; coalesce the resulting
+    // refetches instead of firing one per event.
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefetch = () => {
+      if (pending) return;
+      pending = setTimeout(() => {
+        pending = null;
+        refetch();
+      }, 300);
+    };
     const onEvent = (ev: PipelineEvent) => {
       if (ev.id) {
         if (seen.has(ev.id)) return; // replay after SSE reconnect
@@ -44,10 +54,13 @@ export default function TaskDetailPage() {
         const next = [...prev, ev];
         return next.length > 500 ? next.slice(-500) : next;
       });
-      refetch();
+      scheduleRefetch();
     };
     const unsub = subscribeToEvents(taskId, onEvent, setConnected);
-    return unsub;
+    return () => {
+      if (pending) clearTimeout(pending);
+      unsub();
+    };
   }, [taskId, refetch]);
 
   // Auto-scroll event log

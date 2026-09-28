@@ -88,13 +88,22 @@ def create_app(services=None, graph=None) -> FastAPI:
 
         @app.middleware("http")
         async def spa_navigation(request: Request, call_next):
-            # Only real page loads ask for text/html; fetch()/EventSource do
-            # not, so the same /tasks/{id} path still returns JSON to the app.
-            if (request.method == "GET" and index.is_file()
-                    and "text/html" in request.headers.get("accept", "")
-                    and _SPA_ROUTE.match(request.url.path)):
-                return FileResponse(index)
-            return await call_next(request)
+            if request.method != "GET" or not _SPA_ROUTE.match(request.url.path):
+                return await call_next(request)
+            # Page loads are navigations (Accept: text/html); the app's own
+            # fetch() is not, so the same /tasks/{id} path still returns JSON.
+            h = request.headers
+            navigating = (h.get("sec-fetch-mode") == "navigate"
+                          or "text/html" in h.get("accept", ""))
+            if navigating and index.is_file():
+                resp = FileResponse(index)
+            else:
+                resp = await call_next(request)
+            # One URL, two representations: never let the browser answer a
+            # JSON fetch from the cached HTML page (or vice versa).
+            resp.headers["Vary"] = "Accept, Sec-Fetch-Mode"
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
 
         app.mount("/", StaticFiles(directory=str(dist), html=True), name="frontend")
     return app

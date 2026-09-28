@@ -41,6 +41,20 @@ def test_api_fetch_to_same_path_still_gets_json():
     assert r.headers["content-type"].startswith("application/json")
 
 
+def test_navigate_mode_wins_even_with_generic_accept():
+    r = make_client().get("/tasks/abc123",
+                          headers={"Accept": "*/*", "Sec-Fetch-Mode": "navigate"})
+    assert r.headers["content-type"].startswith("text/html")
+
+
+@pytest.mark.parametrize("headers", [BROWSER, {"Accept": "*/*"}])
+def test_shared_path_responses_are_not_cached_across_representations(headers):
+    # Without this the browser reused the cached HTML for the app's JSON fetch.
+    r = make_client().get("/tasks/abc123", headers=headers)
+    assert "Accept" in r.headers.get("vary", "")
+    assert "no-store" in r.headers.get("cache-control", "")
+
+
 def test_event_stream_and_subroutes_are_not_hijacked():
     c = make_client()
     r = c.get("/tasks/abc123/artifacts", headers=BROWSER)
