@@ -62,7 +62,7 @@ async def test_phase1_end_to_end():
     state = dict(initial_state(
         "e2e-phase1",
         "Fix the failing test in tests/test_calc.py so add(a, b) returns the sum.",
-        os.environ["REPO_UNDER_TEST"], "main", "pytest -q", {}))
+        os.environ["REPO_UNDER_TEST"], "main", "pytest -q"))
 
     interrupted = False
     async for chunk in graph.astream(state, config, stream_mode="updates"):

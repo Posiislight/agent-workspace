@@ -9,7 +9,7 @@ from app.graph.state import initial_state
 
 
 def base_state(**kw):
-    st = dict(initial_state("t1", "desc", "org/repo", "main", "pytest -q", {}))
+    st = dict(initial_state("t1", "desc", "org/repo", "main", "pytest -q"))
     st.update(kw)
     return st
 
@@ -20,7 +20,7 @@ def test_bounds():
 
 
 def test_initial_state_defaults():
-    st = initial_state("t1", "d", "org/repo", "main", "", {})
+    st = initial_state("t1", "d", "org/repo", "main", "")
     assert st["status"] == "planning"
     assert st["retry_counts"] == {"testing": 0, "coding": 0}
     assert st["approval_status"] == "pending"

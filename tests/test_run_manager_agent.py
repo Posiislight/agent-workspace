@@ -21,7 +21,7 @@ def make_state(task_id="t-agent"):
             "research_notes": None, "code_diff": None, "test_results": None,
             "review_comments": None, "approval_status": "pending",
             "retry_counts": {}, "cost_so_far": 0.0, "status": "planning",
-            "error_log": [], "model_overrides": {}, "paused_at": None,
+            "error_log": [], "paused_at": None,
             "resumed_at": None, "pr_url": None, "template_id": "codex"}
 
 

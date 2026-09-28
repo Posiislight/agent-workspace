@@ -28,7 +28,7 @@ async def test_drive_accrues_vm_cost_and_mirrors_totals():
     graph = build_graph(services, InMemorySaver())
     rm = RunManager(services, graph)
     await rm.drive("t-vm", dict(initial_state("t-vm", "fix add", "org/repo",
-                                              "main", "pytest -q", {})))
+                                              "main", "pytest -q")))
     snap = await services.cost.snapshot("t-vm")
     assert snap["llm_cost"] == 0.0       # nodes no longer accrue LLM cost (VM-only from Task 7)
     assert snap["vm_minutes"] > 0
@@ -48,7 +48,7 @@ async def test_paused_approval_does_not_accrue_vm_minutes():
     rm = RunManager(services, graph)
     await rm.drive("t-vm-pause",
                    dict(initial_state("t-vm-pause", "fix add", "org/repo",
-                                      "main", "pytest -q", {})))
+                                      "main", "pytest -q")))
     mirrored = json.loads(await redis.get("aw:t-vm-pause:state"))
     assert mirrored["status"] == "awaiting_approval"
     assert services.cost._awake_since == {}  # window closed at pause

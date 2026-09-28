@@ -15,17 +15,15 @@ from app.graph.build import build_graph
 from app.graph.state import initial_state
 from app.main import create_app
 from app.services.run_manager import RunManager
-from tests.fakes import StubGitHub, StubLLM, StubSandbox, make_services
+from tests.fakes import StubAgent, StubGitHub, make_services
 
 pytestmark = pytest.mark.integration
 
 SECRET = "whsec"
 URLS = "URL: https://docs.example.com/api"
-OPS = json.dumps({"ops": [{"op": "write_file", "path": "calc.py", "content": "x = 1"}], "done": True})
-OPS2 = json.dumps({"ops": [{"op": "write_file", "path": "calc.py", "content": "x = 2"}], "done": True})
 APPROVED = json.dumps({"verdict": "approved", "comments": []})
-SCRIPT_APPROVE = ["PLAN: fix add", URLS, "notes", OPS, APPROVED]
-SCRIPT_REJECT = SCRIPT_APPROVE + ["REVISED PLAN", URLS, "notes2", OPS2, APPROVED]
+SCRIPT_APPROVE = ["PLAN: fix add", URLS, "notes", "DONE", APPROVED]
+SCRIPT_REJECT = SCRIPT_APPROVE + ["REVISED PLAN", URLS, "notes2", "DONE", APPROVED]
 
 
 def make_settings():
@@ -34,8 +32,7 @@ def make_settings():
 
 def _services(script, github, redis_client):
     return make_services(
-        llm=StubLLM(list(script)),
-        sandbox=StubSandbox(),
+        agent=StubAgent(list(script)),
         github=github,
         publisher=EventPublisher(redis_client),
         redis=redis_client,
@@ -44,7 +41,7 @@ def _services(script, github, redis_client):
 
 
 def _state(task_id, description):
-    return dict(initial_state(task_id, description, "org/repo", "main", "pytest -q", {}))
+    return dict(initial_state(task_id, description, "org/repo", "main", "pytest -q"))
 
 
 async def wait_for(predicate, timeout=10.0, msg="condition never met"):

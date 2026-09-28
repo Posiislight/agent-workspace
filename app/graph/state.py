@@ -40,7 +40,6 @@ class TaskState(TypedDict):
     computer_id: Optional[str]
     status: TaskStatus
     error_log: list
-    model_overrides: dict
     paused_at: Optional[str]
     resumed_at: Optional[str]
     pr_url: Optional[str]
@@ -50,14 +49,13 @@ class TaskState(TypedDict):
 
 
 def initial_state(task_id: str, description: str, repo: str, base_branch: str,
-                  test_command: str, model_overrides: dict,
-                  template_id: str = "codex") -> TaskState:
+                  test_command: str, template_id: str = "codex") -> TaskState:
     return TaskState(
         task_id=task_id, task_description=description, repo=repo, base_branch=base_branch,
         test_command=test_command or "", plan=None, research_notes=None, code_diff=None,
         test_results=None, review_comments=None, approval_status="pending",
         retry_counts={"testing": 0, "coding": 0}, cost_so_far=0.0, sandbox_id=None,
-        computer_id=None, status="planning", error_log=[], model_overrides=model_overrides,
+        computer_id=None, status="planning", error_log=[],
         paused_at=None, resumed_at=None, pr_url=None, pr_number=None,
         agent_id=None, template_id=template_id,
     )

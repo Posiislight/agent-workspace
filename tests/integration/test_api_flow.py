@@ -8,16 +8,15 @@ from langgraph.checkpoint.memory import InMemorySaver
 from app.events.publisher import EventPublisher
 from app.graph.build import build_graph
 from app.main import create_app
-from tests.fakes import StubGitHub, StubLLM, make_services
+from tests.fakes import StubAgent, StubGitHub, make_services
 
 pytestmark = pytest.mark.integration
 
+APPROVED = '{"verdict": "approved", "comments": []}'
 SCRIPT_APPROVE = ["PLAN: fix add", "URL: https://docs.example.com/api", "notes",
-                  '{"ops": [{"op": "write_file", "path": "calc.py", "content": "x"}], "done": true}',
-                  '{"verdict": "approved", "comments": []}']
+                  "DONE", APPROVED]
 SCRIPT_REJECT = SCRIPT_APPROVE + ["REVISED PLAN", "URL: https://docs.example.com/api", "notes2",
-                                  '{"ops": [{"op": "write_file", "path": "calc.py", "content": "y"}], "done": true}',
-                                  '{"verdict": "approved", "comments": []}']
+                                  "DONE", APPROVED]
 
 
 async def wait_status(client, task_id, wanted, timeout=10.0):
@@ -47,7 +46,8 @@ async def wait_status_matching(client, task_id, wanted, predicate, timeout=15.0)
 
 
 def make_app(redis_client, script):
-    services = make_services(github=StubGitHub(), llm=StubLLM(list(script)), publisher=EventPublisher(redis_client),
+    services = make_services(github=StubGitHub(), agent=StubAgent(list(script)),
+                             publisher=EventPublisher(redis_client),
                              redis=redis_client)
     graph = build_graph(services, InMemorySaver())
     return create_app(services=services, graph=graph), services
@@ -101,7 +101,7 @@ async def test_submit_watch_approve(redis_client):
     app, _services = make_app(redis_client, SCRIPT_APPROVE)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                  base_url="http://t") as client:
-        r = await client.post("/tasks", json={"task_description": "fix add", "repo": "org/repo"})
+        r = await client.post("/tasks", json={"task_description": "fix add", "repo": "org/repo", "template_id": "codex"})
         assert r.status_code == 201
         tid = r.json()["task_id"]
         st = await wait_status(client, tid, "awaiting_approval")
@@ -118,7 +118,7 @@ async def test_reject_loops_back_to_planner(redis_client):
     app, _services = make_app(redis_client, SCRIPT_REJECT)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                  base_url="http://t") as client:
-        r = await client.post("/tasks", json={"task_description": "fix add", "repo": "org/repo"})
+        r = await client.post("/tasks", json={"task_description": "fix add", "repo": "org/repo", "template_id": "codex"})
         tid = r.json()["task_id"]
         await wait_status(client, tid, "awaiting_approval")
         r = await client.post(f"/tasks/{tid}/reject", json={"feedback": "use uuid"})

@@ -15,21 +15,19 @@ from app.graph.build import build_graph
 from app.graph.state import initial_state
 from app.main import create_app
 from app.services.run_manager import RunManager
-from tests.fakes import StubGitHub, StubLLM, StubSandbox, make_services
+from tests.fakes import StubAgent, StubGitHub, StubSandbox, make_services
 
 pytestmark = pytest.mark.integration
 
 SECRET = "whsec"
-OPS = json.dumps({"ops": [{"op": "write_file", "path": "calc.py",
-                           "content": "x = 1"}], "done": True})
 APPROVED = json.dumps({"verdict": "approved", "comments": []})
 SCRIPT = ["PLAN: fix add", "URL: https://docs.example.com/api", "notes",
-          OPS, APPROVED]
+          "DONE", APPROVED]
 
 
 def _state(tid):
     return dict(initial_state(tid, "add a feature", "org/repo", "main",
-                              "pytest -q", {}))
+                              "pytest -q"))
 
 
 async def wait_for(predicate, timeout=10.0, msg="condition never met"):
@@ -49,7 +47,7 @@ async def test_cost_totals_reach_redis_pr_and_audit_row(settings, redis_client):
     tid = f"t-cost-{uuid.uuid4().hex[:8]}"
     github = StubGitHub()
     services = make_services(
-        llm=StubLLM(list(SCRIPT)), sandbox=StubSandbox(), github=github,
+        agent=StubAgent(list(SCRIPT)), sandbox=StubSandbox(), github=github,
         publisher=EventPublisher(redis_client), redis=redis_client,
         settings=Settings(github_pat="p", github_webhook_secret=SECRET,
                           vm_cost_per_hour=6.0))
@@ -65,10 +63,12 @@ async def test_cost_totals_reach_redis_pr_and_audit_row(settings, redis_client):
                         msg="never reached awaiting_approval")
 
     snap = await services.cost.snapshot(tid)
-    assert snap["llm_cost"] > 0
+    # LLM cost events are gone (apply_llm_cost removed in Task 5); only VM
+    # awake-minutes are tracked now.
+    assert snap["llm_cost"] == 0.0
     assert snap["vm_minutes"] > 0 and snap["vm_cost"] > 0
-    live = await redis_client.get(f"aw:{tid}:cost")
-    assert float(live) == snap["llm_cost"]
+    live_minutes = await redis_client.get(f"aw:{tid}:vm_minutes")
+    assert float(live_minutes) == snap["vm_minutes"]
     assert st["vm_cost"] == snap["vm_cost"]
 
     body = json.dumps({"action": "submitted", "pull_request": {"number": 11},
@@ -92,12 +92,12 @@ async def test_cost_totals_reach_redis_pr_and_audit_row(settings, redis_client):
 
     row = await get_task(settings.database_url, tid)
     assert row["vm_cost"] > 0 and row["vm_minutes"] > 0
-    assert row["cost_so_far"] > 0
 
     events = await redis_client.xrange(f"aw:{tid}:events", min="-", max="+")
     cost_events = [e for e in events if e[1].get("type") == "cost_update"]
-    # planner (1) + researcher (2 calls) + coding_agent (1) + reviewer (1) = 5
-    assert len(cost_events) == 5
+    # apply_llm_cost is gone (Task 5): VM cost arrives via the RunManager
+    # mirror, not node-emitted cost_update events.
+    assert not cost_events
 
 
 def _status(rm, tid, wanted):

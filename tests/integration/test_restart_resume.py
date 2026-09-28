@@ -6,12 +6,12 @@ import pytest
 from app.db import ensure_schema, make_checkpointer
 from app.graph.build import build_graph
 from app.main import create_app
-from tests.fakes import FakePublisher, StubGitHub, StubLLM, make_services
+from tests.fakes import FakePublisher, StubAgent, StubGitHub, make_services
 
 pytestmark = pytest.mark.integration
 
 SCRIPT = ["PLAN: fix add", "URL: https://docs.example.com", "notes",
-          '{"ops": [{"op": "write_file", "path": "calc.py", "content": "x"}], "done": true}',
+          "DONE",
           '{"verdict": "approved", "comments": []}']
 
 
@@ -32,7 +32,7 @@ async def test_interrupt_survives_full_process_restart(settings, redis_client):
     await ensure_schema(settings.database_url)
 
     # --- process A: run to the approval interrupt, then "die" ---
-    services_a = make_services(github=StubGitHub(), llm=StubLLM(SCRIPT), publisher=FakePublisher(),
+    services_a = make_services(github=StubGitHub(), agent=StubAgent(SCRIPT), publisher=FakePublisher(),
                                redis=redis_client, pg_dsn=settings.database_url)
     cm_a = make_checkpointer(settings.database_url)
     checkpointer_a = await cm_a.__aenter__()
@@ -40,7 +40,7 @@ async def test_interrupt_survives_full_process_restart(settings, redis_client):
     app_a = create_app(services=services_a, graph=build_graph(services_a, checkpointer_a))
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_a),
                                  base_url="http://t") as client:
-        r = await client.post("/tasks", json={"task_description": "fix add", "repo": "org/repo"})
+        r = await client.post("/tasks", json={"task_description": "fix add", "repo": "org/repo", "template_id": "codex"})
         tid = r.json()["task_id"]
         st = await wait_status(client, tid, "awaiting_approval")
         assert st["paused_at"]

@@ -8,20 +8,19 @@ from app.graph.build import build_graph
 from app.graph.state import initial_state
 from app.sandbox.base import ExecResult
 from app.services.run_manager import RunManager
-from tests.fakes import StubGitHub, StubLLM, StubSandbox, make_services
+from tests.fakes import StubAgent, StubGitHub, StubSandbox, make_services
 
 pytestmark = pytest.mark.integration
 
 URLS = "URL: https://docs.example.com/api"
 NOTES = "notes with citations"
-OPS = json.dumps({"ops": [{"op": "write_file", "path": "calc.py", "content": "x = 1"}], "done": True})
-OPS2 = json.dumps({"ops": [{"op": "write_file", "path": "calc.py", "content": "x = 2"}], "done": True})
+DONE = "DONE"
 APPROVED = json.dumps({"verdict": "approved", "comments": []})
 NEEDS_CHANGES = json.dumps({"verdict": "needs_changes", "comments": ["check negative numbers"]})
 
 
 def initial():
-    return dict(initial_state("t-scen", "fix add", "org/repo", "main", "pytest -q", {}))
+    return dict(initial_state("t-scen", "fix add", "org/repo", "main", "pytest -q"))
 
 
 async def drive_to_interrupt(graph, tid, payload):
@@ -33,7 +32,8 @@ async def drive_to_interrupt(graph, tid, payload):
 
 
 async def test_happy_path_reaches_approval_interrupt():
-    services = make_services(github=StubGitHub(), llm=StubLLM(["PLAN: fix add", URLS, NOTES, OPS, APPROVED]),
+    services = make_services(github=StubGitHub(),
+                             agent=StubAgent(["PLAN: fix add", URLS, NOTES, DONE, APPROVED]),
                              sandbox=StubSandbox())  # default run result passes
     graph = build_graph(services, InMemorySaver())
     # Driven through RunManager so the pause path runs: the interrupted drive
@@ -44,13 +44,16 @@ async def test_happy_path_reaches_approval_interrupt():
     state = (await graph.aget_state(config)).values
     assert state["code_diff"].startswith("diff --git")
     assert state["test_results"]["passed"] is True
-    assert any(e.type == "cost_update" for e in services.publisher.events)
+    # LLM cost events are gone (apply_llm_cost removed in Task 5); VM-only cost
+    # arrives via the RunManager mirror, not node-emitted cost_update events.
+    assert not any(e.type == "cost_update" for e in services.publisher.events)
     assert services.sandbox_factory(initial()).slept is True
 
 
 async def test_tester_failure_retries_coding_then_reaches_approval():
     sb = StubSandbox(run_results=[ExecResult(1, "FAILED tests/test_calc.py::test_add", "")])
-    services = make_services(github=StubGitHub(), llm=StubLLM(["PLAN", URLS, NOTES, OPS, OPS2, APPROVED]), sandbox=sb)
+    services = make_services(github=StubGitHub(),
+                             agent=StubAgent(["PLAN", URLS, NOTES, DONE, DONE, APPROVED]), sandbox=sb)
     graph = build_graph(services, InMemorySaver())
     config = await drive_to_interrupt(graph, "s2", initial())
     state = (await graph.aget_state(config)).values
@@ -61,7 +64,8 @@ async def test_tester_failure_retries_coding_then_reaches_approval():
 
 async def test_tester_bound_exceeded_reaches_needs_human():
     sb = StubSandbox(default_run_result=ExecResult(1, "FAILED x::y", ""))
-    services = make_services(github=StubGitHub(), llm=StubLLM(["PLAN", URLS, NOTES, OPS, OPS, OPS2, OPS2, OPS2]),
+    services = make_services(github=StubGitHub(),
+                             agent=StubAgent(["PLAN", URLS, NOTES, DONE, DONE, DONE, DONE, DONE]),
                              sandbox=sb)
     graph = build_graph(services, InMemorySaver())
     config = {"configurable": {"thread_id": "s3"}}
@@ -70,13 +74,14 @@ async def test_tester_bound_exceeded_reaches_needs_human():
     state = (await graph.aget_state(config)).values
     assert state["status"] == "needs_human"
     assert state["retry_counts"]["testing"] == 3
-    coding_llm_calls = sum(1 for c in services.llm.calls if c["model"].endswith("claude-sonnet-4.5"))
-    assert coding_llm_calls == 4  # initial + 3 retries
+    coding_calls = [c for c in services.agent.calls if "-coding" in c["conversation_id"]]
+    assert len(coding_calls) == 4  # initial + 3 retries
 
 
 async def test_reviewer_rejection_retries_coding():
-    services = make_services(github=StubGitHub(), llm=StubLLM(["PLAN", URLS, NOTES, OPS,
-                                          NEEDS_CHANGES, OPS2, APPROVED]),
+    services = make_services(github=StubGitHub(),
+                             agent=StubAgent(["PLAN", URLS, NOTES, DONE,
+                                              NEEDS_CHANGES, DONE, APPROVED]),
                              sandbox=StubSandbox())
     graph = build_graph(services, InMemorySaver())
     config = await drive_to_interrupt(graph, "s4", initial())
@@ -86,7 +91,8 @@ async def test_reviewer_rejection_retries_coding():
 
 
 async def test_resume_approved_completes_done():
-    services = make_services(github=StubGitHub(), llm=StubLLM(["PLAN: fix add", URLS, NOTES, OPS, APPROVED]),
+    services = make_services(github=StubGitHub(),
+                             agent=StubAgent(["PLAN: fix add", URLS, NOTES, DONE, APPROVED]),
                              sandbox=StubSandbox())
     graph = build_graph(services, InMemorySaver())
     config = await drive_to_interrupt(graph, "s5", initial())
@@ -99,8 +105,9 @@ async def test_resume_approved_completes_done():
 
 
 async def test_resume_rejected_loops_to_planner_with_feedback():
-    services = make_services(github=StubGitHub(), llm=StubLLM(["PLAN", URLS, NOTES, OPS, APPROVED,
-                                          "REVISED PLAN", URLS, NOTES, OPS2, APPROVED]),
+    services = make_services(github=StubGitHub(),
+                             agent=StubAgent(["PLAN", URLS, NOTES, DONE, APPROVED,
+                                              "REVISED PLAN", URLS, NOTES, DONE, APPROVED]),
                              sandbox=StubSandbox())
     graph = build_graph(services, InMemorySaver())
     config = await drive_to_interrupt(graph, "s6", initial())
