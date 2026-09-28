@@ -34,7 +34,12 @@ export default function TaskDetailPage() {
     setEvents([]);
     refetch();
 
+    const seen = new Set<string>();
     const onEvent = (ev: PipelineEvent) => {
+      if (ev.id) {
+        if (seen.has(ev.id)) return; // replay after SSE reconnect
+        seen.add(ev.id);
+      }
       setEvents((prev) => {
         const next = [...prev, ev];
         return next.length > 500 ? next.slice(-500) : next;

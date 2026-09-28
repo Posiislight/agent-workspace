@@ -101,13 +101,17 @@ export function subscribeToEvents(
       onStateChange?.(false);
       es?.close();
       es = null;
-      // Reconnect with backoff; server replays from beginning of stream.
+      // Reconnect with backoff; server replays from the beginning of the
+      // stream, so consumers must de-duplicate by event id.
       retry = setTimeout(connect, 2000);
     };
     for (const type of EVENT_TYPES) {
       es.addEventListener(type, (msg) => {
         try {
-          onEvent(JSON.parse((msg as MessageEvent).data) as PipelineEvent);
+          const m = msg as MessageEvent;
+          const ev = JSON.parse(m.data) as PipelineEvent;
+          if (m.lastEventId) ev.id = m.lastEventId;
+          onEvent(ev);
         } catch {
           /* malformed event, ignore */
         }

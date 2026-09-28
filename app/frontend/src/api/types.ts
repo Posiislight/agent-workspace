@@ -84,6 +84,8 @@ export interface PipelineEvent {
   type: string;
   data: Record<string, unknown>;
   ts: string;
+  /** Redis stream entry id (SSE `id:`); used to drop replays after reconnect. */
+  id?: string;
 }
 
 export const STAGES: { id: StageId; label: string }[] = [

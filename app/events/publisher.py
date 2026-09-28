@@ -19,10 +19,11 @@ class Event:
         return {"task_id": self.task_id, "node": self.node, "type": self.type,
                 "data": json.dumps(self.data), "ts": self.ts}
 
-    def to_sse(self) -> str:
+    def to_sse(self, event_id: str | None = None) -> str:
         payload = {"task_id": self.task_id, "node": self.node, "type": self.type,
                    "data": self.data, "ts": self.ts}
-        return f"event: {self.type}\ndata: {json.dumps(payload)}\n\n"
+        head = f"id: {event_id}\n" if event_id else ""
+        return f"{head}event: {self.type}\ndata: {json.dumps(payload)}\n\n"
 
 
 class EventPublisher:
