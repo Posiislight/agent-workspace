@@ -152,6 +152,8 @@ class StubAgent:
         self.created: list[str] = []   # template ids
         self.waited: list[str] = []
         self.slept: list[str] = []
+        self.deleted: list[str] = []
+        self.missing: set[str] = set()   # ids exists() reports as gone
         self.compute_seconds = compute_seconds
 
     async def create(self, name, template_id):
@@ -171,6 +173,12 @@ class StubAgent:
 
     async def sleep(self, agent_id):
         self.slept.append(agent_id)
+
+    async def exists(self, agent_id):
+        return agent_id not in self.missing
+
+    async def delete(self, agent_id):
+        self.deleted.append(agent_id)
 
     async def total_compute_seconds(self, agent_id):
         return self.compute_seconds

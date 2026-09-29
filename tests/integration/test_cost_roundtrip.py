@@ -21,8 +21,7 @@ pytestmark = pytest.mark.integration
 
 SECRET = "whsec"
 APPROVED = json.dumps({"verdict": "approved", "comments": []})
-SCRIPT = ["PLAN: fix add", "URL: https://docs.example.com/api", "notes",
-          "DONE", APPROVED]
+SCRIPT = ["PLAN: fix add\nDONE", APPROVED]
 
 
 def _state(tid):

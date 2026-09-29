@@ -5,6 +5,14 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 from app.events.publisher import Event
 
 
+async def event_history(redis, task_id: str, prefix: str = "aw") -> list[dict]:
+    """All events recorded on the task's stream, oldest first, as SSE payload dicts."""
+    entries = await redis.xrange(f"{prefix}:{task_id}:events")
+    return [{"id": entry_id, "task_id": f["task_id"], "node": f["node"],
+             "type": f["type"], "data": json.loads(f["data"]), "ts": f["ts"]}
+            for entry_id, f in entries]
+
+
 async def sse_events(redis, task_id: str, prefix: str = "aw"):
     """Yield SSE strings for all events on the task's stream, then keep following.
 

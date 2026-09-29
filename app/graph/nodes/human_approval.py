@@ -38,5 +38,5 @@ async def human_approval_node(state, *, services):
                        goto="commit_pr")
     desc = state["task_description"] + (f"\n\nHUMAN FEEDBACK: {feedback}" if feedback else "")
     return Command(update={"approval_status": "rejected", "task_description": desc,
-                           "status": "planning", **pr_update},
-                   goto="planner")
+                           "status": "coding", **pr_update},
+                   goto="coding_agent")

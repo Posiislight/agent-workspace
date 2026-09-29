@@ -25,7 +25,8 @@ DDL = """CREATE TABLE IF NOT EXISTS tasks (
   vm_minutes float8,
   retry_counts jsonb,
   pr_url text,
-  pr_number int
+  pr_number int,
+  hidden boolean DEFAULT false
 )"""
 
 
@@ -37,6 +38,8 @@ async def ensure_schema(dsn: str) -> None:
         await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pr_number int")
         await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS vm_cost float8")
         await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS vm_minutes float8")
+        await conn.execute(
+            "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS hidden boolean DEFAULT false")
     finally:
         await conn.close()
 
@@ -63,14 +66,31 @@ async def upsert_task(dsn, task_id, repo, status, *, description=None, paused_at
         await conn.close()
 
 
-async def list_tasks(dsn, limit: int = 100):
+async def list_tasks(dsn, limit: int = 100, include_hidden: bool = False):
     conn = await asyncpg.connect(dsn)
     try:
         rows = await conn.fetch(
             """SELECT task_id, repo, task_description, status, created_at, updated_at,
                       cost_so_far, vm_cost, pr_url
-               FROM tasks ORDER BY created_at DESC LIMIT $1""", limit)
+               FROM tasks WHERE $2 OR NOT coalesce(hidden, false)
+               ORDER BY created_at DESC LIMIT $1""", limit, include_hidden)
         return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def set_hidden(dsn, *, hidden: bool = True, task_ids=(), repos=(),
+                     statuses=None) -> int:
+    """Hide (or unhide) tasks from the default list; returns the row count."""
+    conn = await asyncpg.connect(dsn)
+    try:
+        result = await conn.execute(
+            """UPDATE tasks SET hidden = $1
+               WHERE (task_id = ANY($2::text[]) OR repo = ANY($3::text[]))
+                 AND ($4::text[] IS NULL OR status = ANY($4::text[]))""",
+            hidden, list(task_ids), list(repos),
+            list(statuses) if statuses else None)
+        return int(result.split()[-1])
     finally:
         await conn.close()
 

@@ -55,7 +55,7 @@ def initial_state(task_id: str, description: str, repo: str, base_branch: str,
         test_command=test_command or "", plan=None, research_notes=None, code_diff=None,
         test_results=None, review_comments=None, approval_status="pending",
         retry_counts={"testing": 0, "coding": 0}, cost_so_far=0.0, sandbox_id=None,
-        computer_id=None, status="planning", error_log=[],
+        computer_id=None, status="coding", error_log=[],
         paused_at=None, resumed_at=None, pr_url=None, pr_number=None,
         agent_id=None, template_id=template_id,
     )

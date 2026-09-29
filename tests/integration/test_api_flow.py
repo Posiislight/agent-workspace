@@ -13,10 +13,8 @@ from tests.fakes import StubAgent, StubGitHub, make_services
 pytestmark = pytest.mark.integration
 
 APPROVED = '{"verdict": "approved", "comments": []}'
-SCRIPT_APPROVE = ["PLAN: fix add", "URL: https://docs.example.com/api", "notes",
-                  "DONE", APPROVED]
-SCRIPT_REJECT = SCRIPT_APPROVE + ["REVISED PLAN", "URL: https://docs.example.com/api", "notes2",
-                                  "DONE", APPROVED]
+SCRIPT_APPROVE = ["PLAN: fix add\nDONE", APPROVED]
+SCRIPT_REJECT = SCRIPT_APPROVE + ["REVISED PLAN\nDONE", APPROVED]
 
 
 async def wait_status(client, task_id, wanted, timeout=10.0):
@@ -114,7 +112,7 @@ async def test_submit_watch_approve(redis_client):
         assert art["plan"] == "PLAN: fix add" and art["code_diff"]
 
 
-async def test_reject_loops_back_to_planner(redis_client):
+async def test_reject_loops_back_to_coding(redis_client):
     app, _services = make_app(redis_client, SCRIPT_REJECT)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                  base_url="http://t") as client:

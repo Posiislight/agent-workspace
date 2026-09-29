@@ -24,12 +24,13 @@ async def test_success_chats_once_and_routes_to_tester():
     assert call["conversation_id"] == "aw-t1-coding"
     assert call["agent_id"] == "agent-1"
     assert "TASK:\nfix add" in call["message"]
-    assert "PLAN:\nPLAN" in call["message"]
+    assert "YOUR PREVIOUS PLAN (" in call["message"]
+    assert call["message"].endswith("\nPLAN")
 
 
 async def test_empty_diff_routes_to_needs_human():
     from app.graph.nodes.coding_agent import coding_agent_node
-    stub = StubAgent(responses=["blocked"])
+    stub = StubAgent(responses=["DONE"])
     s = make_services(agent=stub, sandbox=StubSandbox(diff_text=""))
     res = await coding_agent_node(coding_state(), services=s)
     assert res.update["status"] == "needs_human"
@@ -61,3 +62,75 @@ async def test_retry_after_review_consumes_comments():
     assert res.update["review_comments"] is None
     assert "use int not str" in stub.calls[0]["message"]
     assert stub.calls[0]["conversation_id"] == "aw-t1-coding-r1"
+
+
+async def test_prompt_asks_for_tests():
+    from app.graph.nodes.coding_agent import coding_agent_node
+    stub = StubAgent(responses=["DONE"])
+    s = make_services(agent=stub, sandbox=StubSandbox())
+    await coding_agent_node(coding_state(), services=s)
+    msg = stub.calls[0]["message"]
+    assert "add or update tests" in msg
+    assert "no test suite" in msg
+
+
+async def test_reply_without_done_routes_to_needs_human():
+    from app.graph.nodes.coding_agent import coding_agent_node
+    stub = StubAgent(responses=["I could not install tkinter, so I stopped."])
+    sb = StubSandbox()
+    s = make_services(agent=stub, sandbox=sb)
+    res = await coding_agent_node(coding_state(), services=s)
+    assert res.goto == "needs_human"
+    assert res.update["status"] == "needs_human"
+    assert "did not contain DONE" in res.update["error_log"][-1]
+    assert "could not install tkinter" in res.update["error_log"][-1]
+    done = [e for e in s.publisher.events if e.type == "node_completed"][-1]
+    assert done.data["done"] is False
+    assert "could not install tkinter" in done.data["reply"]
+
+
+async def test_done_detection_tolerates_markdown_and_explanation():
+    from app.graph.nodes.coding_agent import coding_agent_node
+    reply = "Removed root.bind; kept the listbox binding.\n\n**DONE**"
+    stub = StubAgent(responses=[reply])
+    s = make_services(agent=stub, sandbox=StubSandbox())
+    res = await coding_agent_node(coding_state(), services=s)
+    assert res.goto == "tester"
+    done = [e for e in s.publisher.events if e.type == "node_completed"][-1]
+    assert done.data["done"] is True
+    assert "Removed root.bind" in done.data["reply"]
+
+
+async def test_done_inside_a_word_is_not_done():
+    from app.graph.nodes.coding_agent import coding_agent_node
+    stub = StubAgent(responses=["Nothing was DONE yet, blocked on auth"])
+    s = make_services(agent=stub, sandbox=StubSandbox())
+    res = await coding_agent_node(coding_state(), services=s)
+    assert res.goto == "needs_human"
+
+
+async def test_reply_excerpt_is_truncated():
+    from app.graph.nodes.coding_agent import REPLY_EXCERPT_CHARS, coding_agent_node
+    stub = StubAgent(responses=["x" * 10_000 + "\nDONE"])
+    s = make_services(agent=stub, sandbox=StubSandbox())
+    await coding_agent_node(coding_state(), services=s)
+    done = [e for e in s.publisher.events if e.type == "node_completed"][-1]
+    assert len(done.data["reply"]) == REPLY_EXCERPT_CHARS
+    assert done.data["reply"].endswith("DONE")
+
+
+async def test_plan_is_taken_from_reply_without_done_line():
+    from app.graph.nodes.coding_agent import coding_agent_node
+    stub = StubAgent(responses=["PLAN: edit app.py to fix add\n\nDONE"])
+    s = make_services(agent=stub, sandbox=StubSandbox())
+    res = await coding_agent_node(coding_state(plan=None), services=s)
+    assert res.update["plan"] == "PLAN: edit app.py to fix add"
+    assert "YOUR PREVIOUS PLAN" not in stub.calls[0]["message"]
+
+
+async def test_bare_done_keeps_previous_plan():
+    from app.graph.nodes.coding_agent import coding_agent_node
+    stub = StubAgent(responses=["DONE"])
+    s = make_services(agent=stub, sandbox=StubSandbox())
+    res = await coding_agent_node(coding_state(), services=s)
+    assert "plan" not in res.update

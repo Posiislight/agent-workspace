@@ -34,6 +34,7 @@ export default function CreateTaskPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    document.title = "New task · agent-workspace";
     api.githubRepos().then(
       (rs) => {
         setRepos(rs);
@@ -96,16 +97,25 @@ export default function CreateTaskPage() {
   };
 
   return (
-    <form className="create-form" onSubmit={submit}>
-      <h2>Create task</h2>
+    <form className="create-form card" onSubmit={submit}>
+      <div>
+        <h2>New task</h2>
+        <p className="muted form-sub">
+          The coding agent implements it, the tester and reviewer check it, and you approve before a PR opens.
+        </p>
+      </div>
 
       <label>
         Description
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="What should the agents build or fix?"
-          rows={5}
+          placeholder="What should the agents build or fix? Be specific about files, behaviour and acceptance criteria."
+          rows={6}
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) e.currentTarget.form?.requestSubmit();
+          }}
           required
         />
       </label>
@@ -141,7 +151,9 @@ export default function CreateTaskPage() {
       </div>
 
       <label>
-        Agent template <span className="muted">(Maritime harness powering every stage)</span>
+        <span>
+          Agent template <span className="muted field-hint">· Maritime harness powering every stage</span>
+        </span>
         {templatesError && (
           <span className="muted error-banner">Couldn't load templates: {templatesError}</span>
         )}
@@ -156,9 +168,12 @@ export default function CreateTaskPage() {
 
       {error && <p className="error-banner">{error}</p>}
 
-      <button type="submit" className="btn primary" disabled={submitting}>
-        {submitting ? "Starting pipeline…" : "Start pipeline"}
-      </button>
+      <div className="form-actions">
+        <span className="muted field-hint">Ctrl + Enter to submit</span>
+        <button type="submit" className="btn primary" disabled={submitting}>
+          {submitting ? "Starting pipeline…" : "Start pipeline →"}
+        </button>
+      </div>
     </form>
   );
 }

@@ -19,4 +19,4 @@ def route_after_reviewer(state) -> str:
 
 
 def route_after_human(state) -> str:
-    return "commit_pr" if state["approval_status"] == "approved" else "planner"
+    return "commit_pr" if state["approval_status"] == "approved" else "coding_agent"

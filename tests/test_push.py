@@ -15,7 +15,10 @@ async def test_push_branch_commits_and_pushes_with_pat():
     assert len(sb.run_calls) == 1
     cmd = sb.run_calls[0]
     assert "git add -A" in cmd
-    assert "git commit" in cmd
+    assert ":(exclude)*.pyc" in cmd
+    assert "commit -m" in cmd
+    # Fresh VMs have no git identity; commit would fail "tell me who you are".
+    assert "-c user.name=" in cmd and "-c user.email=" in cmd
     assert "https://x-access-token:PATSECRET@github.com/org/repo.git" in cmd
     assert "HEAD:refs/heads/aw/t1" in cmd
     assert "git remote set-url origin https://github.com/org/repo.git" in cmd

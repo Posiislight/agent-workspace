@@ -94,12 +94,14 @@ class MaritimeSandbox:
         timeout = self._s.sandbox_run_timeout_seconds if timeout is None else timeout
         run_id = f"{int(time.time() * 1000)}-{self.task_id}"
         log, codef = f"{RUNS_DIR}/{run_id}.log", f"{RUNS_DIR}/{run_id}.code"
+        # PATH instead of `source activate`: a missing activate script used to
+        # fail silently and run tests on the system python.
+        script = (f"export PATH={VENV}/bin:$PATH VIRTUAL_ENV={VENV}; "
+                  f"{command}; echo $? > {codef}")
+        # shlex.quote: a raw '...' wrap broke on commands with their own single
+        # quotes (git commit -m '...'), so the code file never appeared.
         launch = (f"cd {WORKSPACE} && mkdir -p {RUNS_DIR} && nohup bash -c "
-                  # PATH instead of `source activate`: a missing activate script
-                  # used to fail silently and run tests on the system python.
-                  f"'export PATH={VENV}/bin:$PATH VIRTUAL_ENV={VENV}; "
-                  f"{command}; echo $? > {codef}' "
-                  f"> {log} 2>&1 & echo $!")
+                  f"{shlex.quote(script)} > {log} 2>&1 & echo $!")
         started = await self.exec(launch, timeout=30)
         if started.exit_code != 0 or not started.stdout.strip():
             raise RuntimeError(f"run_long launch failed: {started.combined[:1000]}")

@@ -1,4 +1,5 @@
 import json
+import shlex
 
 import httpx
 import pytest
@@ -141,6 +142,22 @@ async def test_run_long_puts_venv_on_path_without_activate():
     launch = [c for c in m.exec_calls if "nohup" in c][0]
     assert "PATH=/data/venv/bin:$PATH" in launch
     assert "activate" not in launch
+
+
+async def test_run_long_quotes_commands_containing_single_quotes():
+    # The push command has `git commit -m '...'`: unescaped, it closed the
+    # bash -c '...' wrapper early, bash hit a syntax error, the exit-code file
+    # was never written and run_long polled until timeout.
+    m = MaritimeMock()
+    _s, _c, sb = make(m)
+    await sb.ensure()
+    cmd = "git commit -m 'aw: task changes' && echo ok"
+    await sb.run_long(cmd, timeout=10)
+    launch = [c for c in m.exec_calls if "nohup" in c][0]
+    argv = shlex.split(launch.split("nohup ", 1)[1])
+    assert argv[:2] == ["bash", "-c"]
+    assert cmd in argv[2]
+    assert "echo $? > /data/.runs/" in argv[2]
 
 
 async def test_run_long_returns_log_output():

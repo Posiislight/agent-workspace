@@ -72,8 +72,6 @@ async def test_phase1_end_to_end():
     assert interrupted
 
     events = publisher.events
-    assert any(e.node == "researcher" and e.data.get("action") == "browser_open" for e in events)
-    assert any(e.data.get("viewer_url") for e in events)
     assert any(e.type == "cost_update" for e in events)
 
     async for _chunk in graph.astream(Command(resume={"decision": "approved", "feedback": ""}),

@@ -71,8 +71,18 @@ class GitHubClient:
               "base": base, "draft": draft})
 
     async def mark_ready(self, repo: str, number: int) -> dict:
-        return await self._request_idempotent_final(
-            "PATCH", f"/repos/{repo}/pulls/{number}", json={"draft": False})
+        # REST PATCH {"draft": false} is silently ignored; leaving draft is
+        # GraphQL-only (markPullRequestReadyForReview).
+        pr = await self._request("GET", f"/repos/{repo}/pulls/{number}")
+        if pr.get("state") != "open" or not pr.get("draft"):
+            return {"already_finalized": True}
+        out = await self._request("POST", "/graphql", json={
+            "query": ("mutation($id: ID!) { markPullRequestReadyForReview("
+                      "input: {pullRequestId: $id}) { pullRequest { isDraft } } }"),
+            "variables": {"id": pr["node_id"]}})
+        if out.get("errors"):
+            raise RuntimeError(f"mark_ready failed: {out['errors'][0].get('message')}")
+        return out["data"]
 
     async def update_pr_body(self, repo: str, number: int, body: str) -> dict:
         return await self._request("PATCH", f"/repos/{repo}/pulls/{number}",

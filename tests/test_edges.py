@@ -21,7 +21,7 @@ def test_bounds():
 
 def test_initial_state_defaults():
     st = initial_state("t1", "d", "org/repo", "main", "")
-    assert st["status"] == "planning"
+    assert st["status"] == "coding"
     assert st["retry_counts"] == {"testing": 0, "coding": 0}
     assert st["approval_status"] == "pending"
     assert st["error_log"] == [] and st["cost_so_far"] == 0.0
@@ -59,4 +59,4 @@ def test_reviewer_bound_exceeded_routes_to_needs_human():
 
 def test_human_routes():
     assert route_after_human(base_state(approval_status="approved")) == "commit_pr"
-    assert route_after_human(base_state(approval_status="rejected")) == "planner"
+    assert route_after_human(base_state(approval_status="rejected")) == "coding_agent"

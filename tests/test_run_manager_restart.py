@@ -3,6 +3,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from langgraph.types import Command
 
 from app.services.run_manager import (
     AlreadyRunning,
@@ -41,7 +42,8 @@ async def test_restart_re_drives_failed_task():
     await rm.restart("t1")
     drive = rm._drives["t1"]
     await drive
-    assert graph.inputs == [None]
+    # No agent anywhere yet: one is created and its id handed to the graph.
+    assert graph.inputs == [Command(update={"agent_id": "agent-1"})]
     state = json.loads(await rm.services.redis.get("aw:t1:state"))
     assert state["status"] == "done"
     assert state["repo"] == "org/repo"
@@ -53,7 +55,8 @@ async def test_restart_re_drives_needs_human_task():
     await _seed(rm, "t2", "needs_human")
     await rm.restart("t2")
     await rm._drives["t2"]
-    assert graph.inputs == [None]
+    # No agent anywhere yet: one is created and its id handed to the graph.
+    assert graph.inputs == [Command(update={"agent_id": "agent-1"})]
 
 
 async def test_restart_emits_restarted_event():

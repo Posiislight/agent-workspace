@@ -20,10 +20,9 @@ from tests.fakes import StubAgent, StubGitHub, make_services
 pytestmark = pytest.mark.integration
 
 SECRET = "whsec"
-URLS = "URL: https://docs.example.com/api"
 APPROVED = json.dumps({"verdict": "approved", "comments": []})
-SCRIPT_APPROVE = ["PLAN: fix add", URLS, "notes", "DONE", APPROVED]
-SCRIPT_REJECT = SCRIPT_APPROVE + ["REVISED PLAN", URLS, "notes2", "DONE", APPROVED]
+SCRIPT_APPROVE = ["PLAN: fix add\nDONE", APPROVED]
+SCRIPT_REJECT = SCRIPT_APPROVE + ["REVISED PLAN\nDONE", APPROVED]
 
 
 def make_settings():
@@ -125,7 +124,7 @@ async def test_approve_via_webhook_reaches_done_with_ready_pr(settings, redis_cl
     assert data["resume_latency_seconds"] >= 0.0
 
 
-async def test_reject_via_webhook_loops_back_to_planner(settings, redis_client):
+async def test_reject_via_webhook_loops_back_to_coding(settings, redis_client):
     await ensure_schema(settings.database_url)
     tid = f"t-rj-{uuid.uuid4().hex[:8]}"
     github = StubGitHub()

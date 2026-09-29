@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.db import list_tasks
-from app.events.sse import sse_events
+from app.events.sse import event_history, sse_events
 from app.graph.state import initial_state
 from app.services.run_manager import (
     AlreadyRunning,
@@ -52,9 +52,10 @@ async def create_task(body: TaskCreate, request: Request):
 
 
 @router.get("")
-async def list_all(request: Request, limit: int = 100):
+async def list_all(request: Request, limit: int = 100, include_hidden: bool = False):
     dsn = request.app.state.services.pg_dsn
-    rows = await list_tasks(dsn, limit=max(1, min(limit, 500)))
+    rows = await list_tasks(dsn, limit=max(1, min(limit, 500)),
+                            include_hidden=include_hidden)
     for r in rows:
         for k in ("created_at", "updated_at"):
             if r.get(k) is not None:
@@ -104,6 +105,12 @@ async def restart(task_id: str, request: Request):
 @router.get("/{task_id}/artifacts")
 async def artifacts(task_id: str, request: Request):
     return await request.app.state.run_manager.artifacts(task_id)
+
+
+@router.get("/{task_id}/events/history")
+async def events_history(task_id: str, request: Request):
+    """Every recorded event for the task, oldest first (drives UI replay)."""
+    return {"events": await event_history(request.app.state.services.redis, task_id)}
 
 
 @router.get("/{task_id}/events")

@@ -10,8 +10,7 @@ from tests.fakes import FakePublisher, StubAgent, StubGitHub, make_services
 
 pytestmark = pytest.mark.integration
 
-SCRIPT = ["PLAN: fix add", "URL: https://docs.example.com", "notes",
-          "DONE",
+SCRIPT = ["PLAN: fix add\nDONE",
           '{"verdict": "approved", "comments": []}']
 
 

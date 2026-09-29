@@ -12,8 +12,6 @@ from tests.fakes import StubAgent, StubGitHub, StubSandbox, make_services
 
 pytestmark = pytest.mark.integration
 
-URLS = "URL: https://docs.example.com/api"
-NOTES = "notes with citations"
 DONE = "DONE"
 APPROVED = json.dumps({"verdict": "approved", "comments": []})
 NEEDS_CHANGES = json.dumps({"verdict": "needs_changes", "comments": ["check negative numbers"]})
@@ -33,7 +31,7 @@ async def drive_to_interrupt(graph, tid, payload):
 
 async def test_happy_path_reaches_approval_interrupt():
     services = make_services(github=StubGitHub(),
-                             agent=StubAgent(["PLAN: fix add", URLS, NOTES, DONE, APPROVED]),
+                             agent=StubAgent(["PLAN: fix add\nDONE", APPROVED]),
                              sandbox=StubSandbox())  # default run result passes
     graph = build_graph(services, InMemorySaver())
     # Driven through RunManager so the pause path runs: the interrupted drive
@@ -53,7 +51,7 @@ async def test_happy_path_reaches_approval_interrupt():
 async def test_tester_failure_retries_coding_then_reaches_approval():
     sb = StubSandbox(run_results=[ExecResult(1, "FAILED tests/test_calc.py::test_add", "")])
     services = make_services(github=StubGitHub(),
-                             agent=StubAgent(["PLAN", URLS, NOTES, DONE, DONE, APPROVED]), sandbox=sb)
+                             agent=StubAgent([DONE, DONE, APPROVED]), sandbox=sb)
     graph = build_graph(services, InMemorySaver())
     config = await drive_to_interrupt(graph, "s2", initial())
     state = (await graph.aget_state(config)).values
@@ -65,7 +63,7 @@ async def test_tester_failure_retries_coding_then_reaches_approval():
 async def test_tester_bound_exceeded_reaches_needs_human():
     sb = StubSandbox(default_run_result=ExecResult(1, "FAILED x::y", ""))
     services = make_services(github=StubGitHub(),
-                             agent=StubAgent(["PLAN", URLS, NOTES, DONE, DONE, DONE, DONE, DONE]),
+                             agent=StubAgent([DONE, DONE, DONE, DONE, DONE]),
                              sandbox=sb)
     graph = build_graph(services, InMemorySaver())
     config = {"configurable": {"thread_id": "s3"}}
@@ -80,8 +78,7 @@ async def test_tester_bound_exceeded_reaches_needs_human():
 
 async def test_reviewer_rejection_retries_coding():
     services = make_services(github=StubGitHub(),
-                             agent=StubAgent(["PLAN", URLS, NOTES, DONE,
-                                              NEEDS_CHANGES, DONE, APPROVED]),
+                             agent=StubAgent([DONE, NEEDS_CHANGES, DONE, APPROVED]),
                              sandbox=StubSandbox())
     graph = build_graph(services, InMemorySaver())
     config = await drive_to_interrupt(graph, "s4", initial())
@@ -92,7 +89,7 @@ async def test_reviewer_rejection_retries_coding():
 
 async def test_resume_approved_completes_done():
     services = make_services(github=StubGitHub(),
-                             agent=StubAgent(["PLAN: fix add", URLS, NOTES, DONE, APPROVED]),
+                             agent=StubAgent(["PLAN: fix add\nDONE", APPROVED]),
                              sandbox=StubSandbox())
     graph = build_graph(services, InMemorySaver())
     config = await drive_to_interrupt(graph, "s5", initial())
@@ -104,10 +101,10 @@ async def test_resume_approved_completes_done():
     assert state["approval_status"] == "approved"
 
 
-async def test_resume_rejected_loops_to_planner_with_feedback():
+async def test_resume_rejected_loops_to_coding_with_feedback():
     services = make_services(github=StubGitHub(),
-                             agent=StubAgent(["PLAN", URLS, NOTES, DONE, APPROVED,
-                                              "REVISED PLAN", URLS, NOTES, DONE, APPROVED]),
+                             agent=StubAgent(["PLAN\nDONE", APPROVED,
+                                              "REVISED PLAN\nDONE", APPROVED]),
                              sandbox=StubSandbox())
     graph = build_graph(services, InMemorySaver())
     config = await drive_to_interrupt(graph, "s6", initial())
@@ -118,4 +115,4 @@ async def test_resume_rejected_loops_to_planner_with_feedback():
             break
     state = (await graph.aget_state(config)).values
     assert state["task_description"].endswith("HUMAN FEEDBACK: use uuid")
-    assert state["plan"] == "REVISED PLAN"  # planner re-entered
+    assert state["plan"] == "REVISED PLAN"  # coding agent re-entered

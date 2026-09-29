@@ -10,6 +10,10 @@ class AgentTimeout(RuntimeError):
     pass
 
 
+class AgentRateLimited(RuntimeError):
+    pass
+
+
 # Harness chat is async under the hood: after ~25s the gateway replies with an
 # acknowledgement while the harness keeps working; messages to that
 # conversation then get a "still working" reply until the answer is ready, and
@@ -21,8 +25,19 @@ _PENDING = re.compile(
 _NUDGE = "Are you finished? If so, reply with your complete answer to my previous request."
 
 
+# When the harness's own LLM calls hit a provider 429, the gateway still
+# answers 200 with this text as the "response". It is not the agent's answer:
+# the request was never processed, so wait and send the same message again.
+_RATE_LIMITED = re.compile(
+    r"^\s*The model provider is rate limiting this agent\b", re.I)
+
+
 def is_pending_reply(text: str | None) -> bool:
     return bool(text) and bool(_PENDING.match(text))
+
+
+def is_rate_limited_reply(text: str | None) -> bool:
+    return bool(text) and bool(_RATE_LIMITED.match(text))
 
 
 class MaritimeAgentClient:
@@ -33,7 +48,9 @@ class MaritimeAgentClient:
             base_url="https://api.maritime.sh", timeout=600)
         self._headers = {"Authorization": f"Bearer {api_key}"}
         self._retry_base = 1.0
-        self._poll_s = 10.0
+        self._poll_s = 30.0
+        self._rate_limit_wait_s = 60.0
+        self._rate_limit_attempts = 6
 
     async def _req(self, method: str, path: str, **kw) -> httpx.Response:
         return await self._client.request(method, path, headers=self._headers, **kw)
@@ -67,19 +84,35 @@ class MaritimeAgentClient:
         """Send `message` and return the harness's final answer.
 
         Polls the same conversation through ack/"still working" replies until
-        the real answer arrives or `timeout_s` elapses (AgentTimeout).
+        the real answer arrives or `timeout_s` elapses (AgentTimeout). A
+        rate-limit reply is waited out and the same message resent; if it
+        persists, AgentRateLimited is raised rather than returned as an answer.
         """
         loop = asyncio.get_event_loop()
         deadline = loop.time() + timeout_s
-        reply = await self._chat_once(agent_id, message, conversation_id)
+        reply = await self._send(agent_id, message, conversation_id)
         while is_pending_reply(reply):
             if loop.time() >= deadline:
                 raise AgentTimeout(
                     f"agent {agent_id} still working on {conversation_id} "
                     f"after {timeout_s}s")
             await asyncio.sleep(self._poll_s)
-            reply = await self._chat_once(agent_id, _NUDGE, conversation_id)
+            reply = await self._send(agent_id, _NUDGE, conversation_id)
         return reply
+
+    async def _send(self, agent_id: str, message: str, conversation_id: str) -> str:
+        for _ in range(self._rate_limit_attempts):
+            reply = await self._chat_once(agent_id, message, conversation_id)
+            if not is_rate_limited_reply(reply):
+                return reply
+            await asyncio.sleep(self._rate_limit_wait_s)
+        # Maritime answers the same way when the account's AI credits are
+        # exhausted (agents on Maritime-managed keys), which no wait fixes.
+        raise AgentRateLimited(
+            f"agent {agent_id} rate limited on {conversation_id} after "
+            f"{self._rate_limit_attempts} attempts. If this persists, the "
+            f"Maritime account's AI credits are likely exhausted: add credits "
+            f"or connect your own API key, then retry. Last reply: {reply[:300]}")
 
     async def _chat_once(self, agent_id: str, message: str, conversation_id: str) -> str:
         async def _call() -> str:
@@ -101,8 +134,21 @@ class MaritimeAgentClient:
         r.raise_for_status()
         return r.json()
 
+    async def exists(self, agent_id: str) -> bool:
+        r = await self._req("GET", f"/api/agents/{agent_id}")
+        if r.status_code == 404:
+            return False
+        r.raise_for_status()
+        return True
+
     async def sleep(self, agent_id: str) -> None:
         await self._req("POST", f"/api/agents/{agent_id}/sleep")
+
+    async def delete(self, agent_id: str) -> None:
+        """Free the agent slot for good; already-deleted is fine."""
+        r = await self._req("DELETE", f"/api/agents/{agent_id}")
+        if r.status_code != 404:
+            r.raise_for_status()
 
     async def total_compute_seconds(self, agent_id: str) -> float:
         return float((await self.get(agent_id)).get("totalComputeSeconds") or 0.0)

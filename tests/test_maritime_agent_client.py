@@ -1,7 +1,7 @@
 import json
 import httpx
 import pytest
-from app.sandbox.maritime_agent import AgentTimeout, MaritimeAgentClient
+from app.sandbox.maritime_agent import AgentRateLimited, AgentTimeout, MaritimeAgentClient
 
 
 def make_client(handler) -> MaritimeAgentClient:
@@ -108,3 +108,82 @@ async def test_chat_raises_on_error_payload():
     c = make_client(handler)
     with pytest.raises(RuntimeError, match="harness crashed"):
         await c.chat("a-1", "m", "c")
+
+
+RATE_LIMITED = ("The model provider is rate limiting this agent right now. Try again in a minute. "
+                "Details: exceeded retry limit, last status: 429 Too Many Requests, request id: x")
+
+
+async def test_chat_waits_out_rate_limit_and_resends_same_message():
+    replies = [RATE_LIMITED, RATE_LIMITED, '{"verdict": "approved"}']
+    seen = []
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        seen.append((body["message"], body["conversation_id"]))
+        return httpx.Response(200, json={"response": replies.pop(0)})
+    c = make_client(handler)
+    c._rate_limit_wait_s = 0
+    assert await c.chat("a-1", "review this", "conv-r") == '{"verdict": "approved"}'
+    # the model never answered, so the ORIGINAL request is resent, not a nudge
+    assert seen == [("review this", "conv-r")] * 3
+
+
+async def test_chat_rate_limit_while_polling_resends_the_nudge():
+    replies = [ACK, RATE_LIMITED, "DONE"]
+    seen = []
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content)["message"])
+        return httpx.Response(200, json={"response": replies.pop(0)})
+    c = make_client(handler)
+    c._poll_s = 0
+    c._rate_limit_wait_s = 0
+    assert await c.chat("a-1", "work", "c") == "DONE"
+    assert seen[0] == "work" and seen[1] == seen[2] != "work"
+
+
+async def test_chat_raises_instead_of_returning_rate_limit_text():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"response": RATE_LIMITED})
+    c = make_client(handler)
+    c._rate_limit_wait_s = 0
+    with pytest.raises(AgentRateLimited):
+        await c.chat("a-1", "m", "c")
+
+
+def test_default_poll_interval_is_30s():
+    # Each poll is a nudge message to the harness; keep them infrequent.
+    assert MaritimeAgentClient("k")._poll_s == 30.0
+
+
+async def test_rate_limit_error_points_at_ai_credits():
+    # Maritime reports exhausted AI credits as this same "rate limiting" text,
+    # so a persistent one must name credits, not just say "try again".
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"response": RATE_LIMITED})
+    c = make_client(handler)
+    c._rate_limit_wait_s = 0
+    with pytest.raises(AgentRateLimited, match="AI credits"):
+        await c.chat("a-1", "m", "c")
+
+
+async def test_delete_removes_agent_and_tolerates_already_gone():
+    seen = []
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path))
+        return httpx.Response(204 if len(seen) == 1 else 404)
+    c = make_client(handler)
+    await c.delete("a-1")
+    await c.delete("a-1")
+    assert seen == [("DELETE", "/api/agents/a-1")] * 2
+
+
+async def test_exists_is_false_only_on_404():
+    codes = {"a-1": 200, "a-2": 404, "a-3": 500}
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(codes[request.url.path.rsplit("/", 1)[1]],
+                              json={"status": "sleeping"})
+    c = make_client(handler)
+    assert await c.exists("a-1") is True
+    assert await c.exists("a-2") is False
+    with pytest.raises(httpx.HTTPStatusError):
+        await c.exists("a-3")

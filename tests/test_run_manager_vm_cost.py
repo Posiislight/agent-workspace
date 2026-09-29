@@ -9,8 +9,7 @@ from app.services.run_manager import RunManager
 from tests.fakes import StubAgent, StubGitHub, StubSandbox, make_services
 
 APPROVED = json.dumps({"verdict": "approved", "comments": []})
-SCRIPT = ["PLAN: fix add", "URL: https://docs.example.com/api", "notes",
-          "DONE", APPROVED]
+SCRIPT = ["PLAN: fix add\nDONE", APPROVED]
 
 
 def _services(redis, rate=6.0):

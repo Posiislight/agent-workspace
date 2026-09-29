@@ -57,3 +57,20 @@ async def test_sse_stream_survives_redis_read_timeout():
             break
     assert chunks[0] == ": keepalive\n\n"
     assert chunks[-1].startswith("id: 5-0\n")
+
+
+async def test_event_history_returns_all_entries_oldest_first():
+    from app.events.sse import event_history
+
+    class FakeRedis:
+        async def xrange(self, key):
+            assert key == "aw:t1:events"
+            return [("1-0", {"task_id": "t1", "node": "planner", "type": "node_started",
+                             "data": "{}", "ts": "T1"}),
+                    ("2-0", {"task_id": "t1", "node": "tester", "type": "node_completed",
+                             "data": '{"passed": true}', "ts": "T2"})]
+
+    events = await event_history(FakeRedis(), "t1")
+    assert [e["id"] for e in events] == ["1-0", "2-0"]
+    assert events[1] == {"id": "2-0", "task_id": "t1", "node": "tester",
+                         "type": "node_completed", "data": {"passed": True}, "ts": "T2"}

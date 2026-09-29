@@ -36,7 +36,7 @@ async def test_human_approval_rejected_appends_feedback(monkeypatch):
     assert res.update["pr_url"].endswith("/pull/11")
     assert res.update["pr_number"] == 11
     assert res.update["task_description"].endswith("HUMAN FEEDBACK: handle empty input")
-    assert res.goto == "planner"
+    assert res.goto == "coding_agent"
 
 
 async def test_needs_human_node():

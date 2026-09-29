@@ -64,6 +64,9 @@ export const api = {
 
   eventsUrl: (id: string) => `/tasks/${id}/events`,
 
+  eventHistory: (id: string) =>
+    request<{ events: PipelineEvent[] }>(`/tasks/${id}/events/history`).then((r) => r.events ?? []),
+
   githubRepos: () =>
     request<{ repos: { full_name: string; private: boolean; default_branch: string }[] }>(
       "/github/repos",

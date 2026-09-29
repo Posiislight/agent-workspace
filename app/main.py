@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.db import ensure_schema, make_checkpointer
 from app.events.publisher import EventPublisher
 from app.graph.build import build_graph
+from app.github.client import GitHubClient
 from app.graph.nodes.helpers import Services
 from app.sandbox.computers import MaritimeComputers
 from app.sandbox.maritime import MaritimeSandbox, make_sandbox
@@ -49,9 +50,15 @@ def create_app(services=None, graph=None) -> FastAPI:
                                                   state["base_branch"],
                                                   client=http_maritime,
                                                   agent_id=state.get("agent_id"))
-            return sandbox_cache[tid]
+            sb = sandbox_cache[tid]
+            if state.get("agent_id") and sb.agent_id != state["agent_id"]:
+                # Restart recreated a deleted agent: follow it, and clone the
+                # repo into the fresh VM on the next ensure().
+                sb.agent_id, sb._provisioned = state["agent_id"], False
+            return sb
 
         agent = MaritimeAgentClient(settings.maritime_api_key, client=http_maritime)
+        github = GitHubClient(settings.github_pat) if settings.github_pat else None
         svc = Services(
             settings=settings,
             publisher=EventPublisher(redis),
@@ -61,6 +68,7 @@ def create_app(services=None, graph=None) -> FastAPI:
             pg_dsn=settings.database_url,
             cost=cost,
             agent=agent,
+            github=github,
         )
         cm = make_checkpointer(settings.database_url)
         checkpointer = await cm.__aenter__()
@@ -70,6 +78,8 @@ def create_app(services=None, graph=None) -> FastAPI:
         yield
         await redis.aclose()
         await http_maritime.aclose()
+        if github is not None:
+            await github.aclose()
         await cm.__aexit__(None, None, None)
 
     app = FastAPI(title="agent-workspace", lifespan=lifespan)

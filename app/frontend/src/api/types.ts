@@ -10,7 +10,14 @@ export type TaskStatus =
   | "failed"
   | "needs_human";
 
-export type StageId = "planner" | "researcher" | "coding" | "tester" | "reviewer" | "human_approval" | "commit_pr";
+export type StageId =
+  | "planner"
+  | "researcher"
+  | "coding"
+  | "tester"
+  | "reviewer"
+  | "human_approval"
+  | "commit_pr";
 
 export type StageState = "pending" | "running" | "done" | "failed";
 
@@ -89,8 +96,6 @@ export interface PipelineEvent {
 }
 
 export const STAGES: { id: StageId; label: string }[] = [
-  { id: "planner", label: "Planner" },
-  { id: "researcher", label: "Researcher" },
   { id: "coding", label: "Coding" },
   { id: "tester", label: "Tester" },
   { id: "reviewer", label: "Reviewer" },
@@ -98,9 +103,17 @@ export const STAGES: { id: StageId; label: string }[] = [
   { id: "commit_pr", label: "Commit & PR" },
 ];
 
+// Runs recorded before the graph started at coding also went through these;
+// replay shows them in front of STAGES when the recording contains them.
+export const LEGACY_STAGES: { id: StageId; label: string }[] = [
+  { id: "planner", label: "Planner" },
+  { id: "researcher", label: "Researcher" },
+];
+
 export const STATUS_TO_STAGE: Partial<Record<TaskStatus, StageId>> = {
-  planning: "planner",
-  researching: "researcher",
+  // Legacy statuses from before the graph started at coding.
+  planning: "coding",
+  researching: "coding",
   coding: "coding",
   testing: "tester",
   reviewing: "reviewer",

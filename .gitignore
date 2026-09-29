@@ -10,3 +10,5 @@ uvicorn.log
 
 node_modules/
 *.tsbuildinfo
+.server.log
+.server.err.log

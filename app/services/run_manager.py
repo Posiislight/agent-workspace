@@ -94,9 +94,20 @@ class RunManager:
                     state = await self.get_state(task_id) or {}
                     agent_id = state.get("agent_id")
                     template = state.get("template_id", "codex")
+                    if agent_id is None:
+                        # The mirror misses it if the first node crashed before
+                        # any update; the checkpoint holds the drive's input.
+                        snap = await self.graph.aget_state(config)
+                        agent_id = (snap.values or {}).get("agent_id") if snap else None
+                    if agent_id is not None and not await agent.exists(agent_id):
+                        agent_id = None  # deleted since (slot freed): recreate
                 if agent_id is None:
                     agent_id = await agent.create(f"aw-task-{task_id}", template)
                     await agent.wait_active(agent_id)
+                    if graph_input is None:
+                        # Command(update=...) keeps the thread's pending node;
+                        # aupdate_state would drop a Command goto and stall it.
+                        graph_input = Command(update={"agent_id": agent_id})
             if isinstance(graph_input, dict):
                 graph_input = {**graph_input, "agent_id": agent_id}
             paused = False
@@ -160,8 +171,11 @@ class RunManager:
             if self.services.redis is not None and not paused:
                 await self.services.redis.delete(lock_key)
             if agent is not None and agent_id and not paused:
+                # A done task never runs again, and a sleeping agent still
+                # holds one of the plan's agent slots: delete it instead.
+                finished = (last_values or {}).get("status") == "done"
                 try:
-                    await agent.sleep(agent_id)
+                    await (agent.delete if finished else agent.sleep)(agent_id)
                 except Exception:  # noqa: BLE001, S110 - best-effort
                     pass
 

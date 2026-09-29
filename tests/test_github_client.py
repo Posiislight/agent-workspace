@@ -1,6 +1,7 @@
 import json
 
 import httpx
+import pytest
 
 from app.github.client import GitHubClient
 
@@ -77,19 +78,65 @@ async def test_merge_pr_already_merged_returns_finalized():
     assert result == {"already_finalized": True}
 
 
-async def test_mark_ready_on_closed_pr_returns_finalized():
+async def test_mark_ready_uses_graphql_mutation():
+    # REST PATCH {"draft": false} is silently ignored by GitHub; leaving draft
+    # needs the markPullRequestReadyForReview GraphQL mutation.
+    calls = []
+
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.method == "PATCH"
-        return httpx.Response(422, json={"message": "Validation Failed"})
+        calls.append((request.method, request.url.path, request.content))
+        if request.method == "GET":
+            return httpx.Response(200, json={"node_id": "PR_abc", "draft": True,
+                                             "state": "open"})
+        return httpx.Response(200, json={"data": {"markPullRequestReadyForReview": {
+            "pullRequest": {"isDraft": False}}}})
 
     gh = GitHubClient("tok123")
     gh._client = httpx.AsyncClient(
         transport=_transport(handler), base_url="https://api.github.com")
     try:
-        result = await gh.mark_ready("org/repo", 7)
+        await gh.mark_ready("org/repo", 7)
     finally:
         await gh.aclose()
-    assert result == {"already_finalized": True}
+    assert calls[0][:2] == ("GET", "/repos/org/repo/pulls/7")
+    assert calls[1][:2] == ("POST", "/graphql")
+    body = json.loads(calls[1][2])
+    assert "markPullRequestReadyForReview" in body["query"]
+    assert body["variables"] == {"id": "PR_abc"}
+
+
+async def test_mark_ready_graphql_error_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"node_id": "PR_abc", "draft": True,
+                                             "state": "open"})
+        return httpx.Response(200, json={"errors": [{"message": "nope"}]})
+
+    gh = GitHubClient("tok123")
+    gh._client = httpx.AsyncClient(
+        transport=_transport(handler), base_url="https://api.github.com")
+    try:
+        with pytest.raises(RuntimeError, match="nope"):
+            await gh.mark_ready("org/repo", 7)
+    finally:
+        await gh.aclose()
+
+
+async def test_mark_ready_on_closed_or_ready_pr_returns_finalized():
+    for pr in ({"node_id": "x", "draft": True, "state": "closed"},
+               {"node_id": "x", "draft": False, "state": "open"}):
+        def handler(request: httpx.Request, pr=pr) -> httpx.Response:
+            assert request.method == "GET"
+            return httpx.Response(200, json=pr)
+
+        gh = GitHubClient("tok123")
+        gh._client = httpx.AsyncClient(
+            transport=_transport(handler), base_url="https://api.github.com")
+        try:
+            result = await gh.mark_ready("org/repo", 7)
+        finally:
+            await gh.aclose()
+        assert result == {"already_finalized": True}
 
 
 async def test_merge_pr_other_status_still_raises():
