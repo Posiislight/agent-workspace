@@ -20,18 +20,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://aw:aw@localhost:5433/agent_workspace"
     redis_url: str = "redis://localhost:6380/0"
 
-    model_planner: str = "openai/gpt-4.1-mini"
-    model_researcher: str = "openai/gpt-4.1-mini"
-    model_coding_agent: str = "anthropic/claude-sonnet-4.5"
-    model_reviewer: str = "openai/gpt-4.1-mini"
-
     sandbox_run_timeout_seconds: int = 1800
     sandbox_exec_timeout_seconds: int = 110
     sandbox_poll_interval_seconds: float = 2.0
     test_command: str = "python -m pytest -q"  # -m puts repo root on sys.path
-
-    backoff_attempts: int = 3
-    backoff_base_delay: float = 1.0
 
 
 @lru_cache

@@ -1,97 +1,94 @@
 # agent-workspace
 
-Self-hosted multi-agent AI coding workspace: Planner → Researcher → Coding Agent →
-Tester → Reviewer → Human Approval → Commit & PR, running on persistent Maritime VMs.
+Self-hosted AI coding pipeline. Describe a change in plain English, pick a GitHub
+repo, and five stages take it all the way to a real pull request:
 
-## Status
+    Coding  →  Tester  →  Reviewer  →  Human approval  →  Commit & PR
 
-Implemented today (phase 1 — orchestrator core):
+Every task runs on its own [Maritime](https://maritime.sh) agent VM: created when the
+task starts, asleep while it waits for your approval, woken from the same checkpoint
+when you decide, and deleted once the task is done.
 
-- Full LangGraph pipeline (Planner → Researcher → Coding Agent → Tester → Reviewer)
-  with conditional retry routing and bounded retries
-- Human Approval `interrupt()` that survives a full process restart, resumed via the API
-- FastAPI surface (`/tasks`, SSE live progress, approve/reject, artifacts)
-- Postgres checkpointing + tasks index table; Redis event bus (Streams → SSE)
-- Maritime micro-VM per task (warm reuse across retries, sleep at approval)
+## How it works
 
-In progress / planned (see `docs/superpowers/`):
+| Stage | What happens |
+|---|---|
+| **Coding** | A Maritime agent (Codex or DeepSeek harness) explores the cloned repo, plans, edits files and writes tests inside the VM. |
+| **Tester** | Mechanical, no LLM: installs dependencies and runs the repo's real test suite (`python -m pytest -q` by default). Failures go back to Coding with the output. |
+| **Reviewer** | The same agent reviews the diff and returns `approved` or `needs_changes`. Change requests go back to Coding. |
+| **Human approval** | Pushes an `aw/{task_id}` branch, opens a **draft PR**, and pauses. The VM sleeps, so idle time isn't billed. |
+| **Commit & PR** | On approval: pushes the final branch, marks the PR ready for review (or squash-merges), and posts a final summary comment. |
 
-- Phase 2 — GitHub approval loop: draft PR at the approval gate, approve/reject via
-  GitHub webhooks, Commit & PR finalization
-- Phase 3 — cost tracking (per-call LLM cost, VM awake-minutes, audit rows)
+Retries are bounded: 3 test failures or 2 rejected reviews stop the task in
+`needs_human` instead of looping forever. A rejection at the approval gate (with a
+reason) sends the task back to Coding with your feedback.
 
-## Phase 2 — GitHub approval loop
+**Under the hood:** FastAPI + LangGraph. Graph state is checkpointed in Postgres, so a
+paused task survives a server restart. Live progress goes through Redis Streams to the
+browser over SSE. The React UI shows the stage timeline, plan, diff, test output,
+review comments, a sleep/wake card and a replay of past runs.
 
-At the human-approval gate the system pushes an `aw/{task_id}` branch and opens a
-**draft PR** containing the task, plan, diff, test results, reviewer comments, running
-cost, and retry counts. The task then sleeps until a decision arrives.
+## Deciding from GitHub (optional)
 
-Webhook setup on the target repo (Settings → Webhooks):
+Besides the Approve / Reject buttons in the UI, you can decide on the PR itself.
+Add a webhook on the target repo (Settings → Webhooks):
 
-- Payload URL: `https://<your-host>/webhooks/github`
-- Content type: `application/json`
+- Payload URL: `https://<your-host>/webhooks/github`, content type `application/json`
 - Secret: the value of `GITHUB_WEBHOOK_SECRET` (HMAC-SHA256 verified)
 - Events: Pull requests, Pull request reviews, Issue comments
 
-Deciding from GitHub itself:
-
-- comment `approve` on the PR, or submit an approving review, or mark the PR
-  ready for review → task resumes as approved
-- comment `reject: <reason>` (or a changes-requested review) → task resumes as
-  rejected; the reason is appended to the task description and the plan is revised
-  by the Planner
-
-Once approved, the `commit_pr` node pushes the final branch, marks the PR ready
-(or squash-merges when `MERGE_PR_WHEN_READY=true`), and appends a final summary
-comment with total cost, retry cycles, and pause/resume timestamps.
-
-## Phase 3 — Cost tracking
-
-Cost accrues in real time while a task runs:
-
-- **Per-call LLM cost**: each model call records OpenRouter token usage, priced
-  against a price table fetched once at startup from OpenRouter's `/models`
-  endpoint. Every update is persisted with `INCRBYFLOAT aw:{id}:cost` and
-  broadcast as a `cost_update` SSE event.
-- **VM awake-minutes**: each graph drive opens an awake window on the task's VM;
-  time spent paused at the approval gate does not accrue. Minutes are stored in
-  `aw:{id}:vm_minutes` and multiplied by `VM_COST_PER_HOUR` ($/hour, default 0)
-  into `aw:{id}:vm_cost`.
-- **Final totals**: written to the tasks table (`vm_cost`, `vm_minutes` columns)
-  and into the final PR description and summary comment as an LLM/VM breakdown.
-
-Where to see it live: the task detail page cost chips (refreshed via SSE),
-`GET /tasks/{id}` (`llm_cost`, `vm_cost`, `vm_minutes`), and the Redis key
-`aw:{id}:cost`.
+Then comment `approve` (or approve the review, or mark the PR ready) to approve, or
+`reject: <reason>` (or request changes) to send it back to Coding.
 
 ## Setup
 
-macOS / Linux:
-
-    python3 -m venv .venv
-    .venv/bin/pip install -e ".[dev]"
-    cp .env.example .env       # fill in keys
-    docker compose up -d       # postgres :5433, redis :6380
-    python -m pytest tests -m "not integration and not e2e"
-
-Windows (PowerShell):
+Requirements: Python 3.12+, Docker, a Maritime account, and a GitHub token.
 
     python -m venv .venv
-    .venv\Scripts\pip install -e ".[dev]"
-    copy .env.example .env     # fill in keys
-    docker compose up -d       # postgres :5433, redis :6380
-    python -m pytest tests -m "not integration and not e2e"
+    .venv/bin/pip install -e ".[dev]"        # Windows: .venv\Scripts\pip ...
+    cp .env.example .env                     # then fill in the keys below
+    docker compose up -d                     # Postgres :5433, Redis :6380
 
-`MARITIME_TEMPLATE_ID`: pick from `curl https://api.maritime.sh/api/templates` —
-choose a template with git + python3 + network access. Maritime computers (Researcher's
-headful browser) additionally require a paid Maritime plan.
+| Variable | Needed | Notes |
+|---|---|---|
+| `MARITIME_API_KEY` | yes | Runs the agent VMs. The agent's model usage is billed by Maritime. |
+| `GITHUB_PAT` | yes | Fine-grained token with **Contents: Read and write** and **Pull requests: Read and write** on the target repos. |
+| `MARITIME_TEMPLATE_ID` | no | Default harness template; the UI lets you pick `codex` or `dsh` per task. |
+| `GITHUB_WEBHOOK_SECRET` | no | Only for deciding from GitHub. |
+| `MERGE_PR_WHEN_READY` | no | `true` squash-merges on approval instead of marking the PR ready. |
+| `VM_COST_PER_HOUR` | no | $/hour used to price VM awake time in the cost summary (default 0). |
 
 ## Run
 
-macOS / Linux:
+    .venv/bin/python run.py                  # Windows: .venv\Scripts\python run.py
 
-    .venv/bin/python run.py
+Open http://localhost:8000, click **New Task**, describe the change, choose a repo and
+template, and start the pipeline. Approve from the task page when it pauses.
 
-Windows (PowerShell):
+The API is the same surface the UI uses:
 
-    .venv\Scripts\python run.py
+| Endpoint | Purpose |
+|---|---|
+| `POST /tasks` | Start a task (`task_description`, `repo`, `template_id`; optional `base_branch`, `test_command`) |
+| `GET /tasks`, `GET /tasks/{id}` | List tasks / full task state |
+| `GET /tasks/{id}/events` | Live SSE stream (`/events/history` for the backlog) |
+| `POST /tasks/{id}/approve`, `/reject` | Decide at the approval gate (optional `feedback`) |
+| `POST /tasks/{id}/restart` | Re-drive a `failed` / `needs_human` task from its last checkpoint |
+| `GET /templates`, `GET /github/repos` | Harness templates and repos the token can see |
+
+To tidy the task list without deleting anything: `python scripts/hide_tasks.py --help`.
+
+## Tests
+
+    python -m pytest tests -m "not integration and not e2e"   # fast unit tests
+    python -m pytest tests -m integration                     # needs docker compose up
+
+## Layout
+
+    app/api/        FastAPI routes (tasks, GitHub webhooks, templates/repos)
+    app/graph/      LangGraph pipeline: nodes, routing, state
+    app/sandbox/    Maritime integration: agent VMs, exec, long-running commands
+    app/github/     PR lifecycle: push, draft PR, ready/merge, comments
+    app/services/   Run manager (drive/pause/resume/restart) and cost tracking
+    app/frontend/   React UI (built output in dist/ is served by the API)
+    docs/           Design specs and implementation plans

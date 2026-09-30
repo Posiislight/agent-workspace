@@ -76,7 +76,9 @@ async def _resume(request: Request, task_id: str, decision: str, feedback: str):
         await request.app.state.run_manager.resume(task_id, decision, feedback)
     except TaskNotFound as e:
         raise HTTPException(404, str(e)) from e
-    except NotAwaitingApproval as e:
+    except (NotAwaitingApproval, AlreadyRunning) as e:
+        # AlreadyRunning: a duplicate decision (e.g. double-click) arrived
+        # while the first resume is still in flight.
         raise HTTPException(409, str(e)) from e
     return {"resumed": True, "decision": decision}
 

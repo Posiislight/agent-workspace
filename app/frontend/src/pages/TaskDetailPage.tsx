@@ -63,6 +63,7 @@ export default function TaskDetailPage() {
   const [connected, setConnected] = useState(false);
   const [deciding, setDeciding] = useState(false);
   const [decideError, setDecideError] = useState<string | null>(null);
+  const decidingRef = useRef(false);
   const [restarting, setRestarting] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -117,7 +118,10 @@ export default function TaskDetailPage() {
 
 
   const decide = async (decision: "approve" | "reject", feedback: string) => {
-    if (!taskId) return;
+    // A ref, not the `deciding` state: a double-click fires both handlers
+    // before React re-renders the disabled button.
+    if (!taskId || decidingRef.current) return;
+    decidingRef.current = true;
     setDeciding(true);
     setDecideError(null);
     try {
@@ -126,6 +130,7 @@ export default function TaskDetailPage() {
     } catch (e) {
       setDecideError(e instanceof Error ? e.message : String(e));
     } finally {
+      decidingRef.current = false;
       setDeciding(false);
     }
   };
